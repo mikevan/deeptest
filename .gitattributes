@@ -1,0 +1,5 @@
+# Keep line endings as written (LF) on every platform so hooks, wasm-adjacent files, and diffs stay stable.
+* text=auto eol=lf
+*.wasm binary
+*.png binary
+*.vsix binary

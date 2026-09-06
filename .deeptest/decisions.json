@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "decisions": [
+    {
+      "path": "src/languages/typescript/structure.ts",
+      "line": 448,
+      "lineHash": "8adf98dba67de9ae",
+      "kind": "fix",
+      "reason": "",
+      "by": "vange",
+      "at": "2026-09-06T06:56:53.515Z",
+      "gapAtDecision": 17
+    },
+    {
+      "path": "src/languages/typescript/structure.ts",
+      "line": 425,
+      "lineHash": "d6e6266f5b234703",
+      "kind": "fix",
+      "reason": "",
+      "by": "vange",
+      "at": "2026-09-06T07:16:58.845Z",
+      "gapAtDecision": 14
+    },
+    {
+      "path": "src/languages/typescript/structure.ts",
+      "line": 426,
+      "lineHash": "148f3fe140e796ec",
+      "kind": "fix",
+      "reason": "",
+      "by": "vange",
+      "at": "2026-09-06T07:21:05.550Z",
+      "gapAtDecision": 14
+    },
+    {
+      "path": "src/languages/typescript/structure.ts",
+      "line": 430,
+      "lineHash": "df0900bfede9bd84",
+      "kind": "fix",
+      "reason": "",
+      "by": "vange",
+      "at": "2026-09-06T07:24:05.016Z",
+      "gapAtDecision": 14
+    },
+    {
+      "path": "src/languages/python/structure.ts",
+      "line": 448,
+      "lineHash": "8d6e432cc988348e",
+      "kind": "fix",
+      "reason": "",
+      "by": "vange",
+      "at": "2026-09-06T07:44:44.468Z",
+      "gapAtDecision": 5
+    },
+    {
+      "path": "src/languages/python/structure.ts",
+      "line": 300,
+      "lineHash": "cdcc19e2169de625",
+      "kind": "fix",
+      "reason": "refactor to at most 10 ways through",
+      "by": "vange",
+      "at": "2026-09-06T07:52:07.412Z",
+      "gapAtDecision": 38,
+      "scope": "function",
+      "functionName": "visitStatement"
+    }
+  ]
+}

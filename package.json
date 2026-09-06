@@ -1,0 +1,333 @@
+{
+  "name": "deeptest",
+  "displayName": "DeepTest",
+  "description": "Checks an AI's work. Runs your tests, then shows, in plain words, which lines of code no test ever reached and how many tests each line needs. You decide what to do about it.",
+  "version": "0.3.6",
+  "publisher": "prs",
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mikevan/deeptest.git"
+  },
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": [
+    "Testing",
+    "Visualization"
+  ],
+  "activationEvents": [
+    "workspaceContains:**/*.py",
+    "workspaceContains:**/*.{ts,tsx,js,jsx,mjs,cjs}",
+    "onView:deeptest.sidebar"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "deeptest",
+          "title": "DeepTest 0.3.6",
+          "icon": "media/deeptest.svg"
+        }
+      ]
+    },
+    "views": {
+      "deeptest": [
+        {
+          "type": "webview",
+          "id": "deeptest.sidebar",
+          "name": "DeepTest 0.3.6",
+          "icon": "media/deeptest.svg",
+          "contextualTitle": "DeepTest 0.3.6"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "deeptest.run",
+        "title": "Check my code",
+        "category": "DeepTest",
+        "icon": "$(play)"
+      },
+      {
+        "command": "deeptest.configure",
+        "title": "Tell me where the tests are",
+        "category": "DeepTest",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "deeptest.clear",
+        "title": "Clear the colours",
+        "category": "DeepTest",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "deeptest.toggleOverlay",
+        "title": "Colour the lines in my files on or off",
+        "category": "DeepTest",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "deeptest.showOutput",
+        "title": "Show what is happening",
+        "category": "DeepTest",
+        "icon": "$(output)"
+      },
+      {
+        "command": "deeptest.openLine",
+        "title": "Open line",
+        "category": "DeepTest"
+      },
+      {
+        "command": "deeptest.report",
+        "title": "Full report",
+        "category": "DeepTest",
+        "icon": "$(book)"
+      },
+      {
+        "command": "deeptest.decide",
+        "title": "Decide what to do about this line",
+        "category": "DeepTest",
+        "icon": "$(person)"
+      },
+      {
+        "command": "deeptest.fix",
+        "title": "Fix this: hand a brief to your assistant",
+        "category": "DeepTest",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "deeptest.fixFunction",
+        "title": "Fix this function: hand a brief to your assistant",
+        "category": "DeepTest"
+      },
+      {
+        "command": "deeptest.undoFunctionDecision",
+        "title": "Remove the decision about a function",
+        "category": "DeepTest"
+      },
+      {
+        "command": "deeptest.accept",
+        "title": "Accept this line as it is, with a reason",
+        "category": "DeepTest",
+        "icon": "$(check)"
+      },
+      {
+        "command": "deeptest.undoDecision",
+        "title": "Undo the decision on this line",
+        "category": "DeepTest",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "deeptest.toggleNumbers",
+        "title": "Show the numbers (for engineers) on or off",
+        "category": "DeepTest",
+        "icon": "$(symbol-number)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "deeptest.run",
+          "when": "view == deeptest.sidebar",
+          "group": "navigation@1"
+        },
+        {
+          "command": "deeptest.report",
+          "when": "view == deeptest.sidebar && deeptest.hasResults",
+          "group": "navigation@2"
+        },
+        {
+          "command": "deeptest.configure",
+          "when": "view == deeptest.sidebar",
+          "group": "navigation@3"
+        },
+        {
+          "command": "deeptest.showOutput",
+          "when": "view == deeptest.sidebar",
+          "group": "navigation@4"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "deeptest.openLine",
+          "when": "false"
+        },
+        {
+          "command": "deeptest.fix",
+          "when": "false"
+        },
+        {
+          "command": "deeptest.fixFunction",
+          "when": "false"
+        },
+        {
+          "command": "deeptest.undoFunctionDecision",
+          "when": "false"
+        },
+        {
+          "command": "deeptest.accept",
+          "when": "false"
+        },
+        {
+          "command": "deeptest.undoDecision",
+          "when": "false"
+        },
+        {
+          "command": "deeptest.decide",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "DeepTest",
+      "properties": {
+        "deeptest.language": {
+          "type": "string",
+          "default": "",
+          "description": "Which language plugin checks this project (python, typescript). Filled in for you on the first check."
+        },
+        "deeptest.testsPath": {
+          "type": "string",
+          "default": "",
+          "description": "Folder that holds the tests, relative to the project. Found for you when empty."
+        },
+        "deeptest.sourceRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Folder that holds the code being checked. Empty means the whole project apart from the tests."
+        },
+        "deeptest.languageSettings": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "object"
+          },
+          "markdownDescription": "Language-specific fields, keyed by plugin id, e.g. `{ \"python\": { \"interpreter\": \"python3\" } }`. The DeepTest configuration screen edits these for you."
+        },
+        "deeptest.thresholds.maxFunctionComplexity": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "description": "How many ways through a single function you will allow before it counts as too hard to test."
+        },
+        "deeptest.thresholds.minCoverage": {
+          "type": "number",
+          "default": 80,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "How much of the code the tests must reach, in percent."
+        },
+        "deeptest.thresholds.minAverageDensity": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0,
+          "description": "Advanced. Minimum average of tests divided by the conditions guarding a line."
+        },
+        "deeptest.thresholds.minDensityPassRate": {
+          "type": "number",
+          "default": 90,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "How many lines must have enough tests, in percent."
+        },
+        "deeptest.depth.countShortCircuit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Count each 'and' / 'or' operand as its own decision (MC/DC style)."
+        },
+        "deeptest.depth.countTernary": {
+          "type": "boolean",
+          "default": true,
+          "description": "Count a conditional expression (x if c else y) as a decision."
+        },
+        "deeptest.depth.countComprehensions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Count 'for' and 'if' clauses inside comprehensions as decisions."
+        },
+        "deeptest.depth.countExcept": {
+          "type": "boolean",
+          "default": true,
+          "description": "Count each 'except' clause as a decision guarding its body."
+        },
+        "deeptest.overlay.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the per-line overlay in editors."
+        },
+        "deeptest.overlay.showInlineNumbers": {
+          "type": "boolean",
+          "default": true,
+          "description": "Write 'never tested, needs 3' at the end of lines that fall short."
+        },
+        "deeptest.showNumbers": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the engineer's numbers (density, depth, bar, cyclomatic complexity) next to the plain words."
+        },
+        "deeptest.keepSafe.offerCheckpoint": {
+          "type": "boolean",
+          "default": true,
+          "description": "Before \"Fix this\" hands work to an AI assistant, offer to create a KeepSafe checkpoint. Only applies when the KeepSafe extension (KeepSafe.keepsafe) is installed."
+        },
+        "deeptest.colors.over": {
+          "type": "string",
+          "default": "rgba(46, 160, 67, 0.28)",
+          "description": "Line background when tests exceed the bar."
+        },
+        "deeptest.colors.met": {
+          "type": "string",
+          "default": "rgba(126, 231, 135, 0.22)",
+          "description": "Line background when tests equal the bar."
+        },
+        "deeptest.colors.short": {
+          "type": "string",
+          "default": "rgba(255, 221, 87, 0.30)",
+          "description": "Line background when tests are below the bar."
+        },
+        "deeptest.colors.untested": {
+          "type": "string",
+          "default": "rgba(248, 81, 73, 0.30)",
+          "description": "Line background when no test touched the line."
+        },
+        "deeptest.colors.unreachable": {
+          "type": "string",
+          "default": "rgba(139, 148, 158, 0.25)",
+          "description": "Line background for statically unreachable code."
+        },
+        "deeptest.report.detailedRoutes": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "description": "How many of the worst lines get the full story. The rest get one row."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "compile-tests": "tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "package": "npm run check && npm run test && npm run build",
+    "test:vscode": "npm run build && npm run compile-tests && node out/test/integration/runTests.js",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "web-tree-sitter": "0.27.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.17",
+    "@types/vscode": "^1.104.0",
+    "@vitest/coverage-istanbul": "^3.2.7",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "0.28.2",
+    "jest": "^30.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

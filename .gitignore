@@ -1,0 +1,14 @@
+node_modules/
+out/
+dist/
+.vscode-test/
+*.vsix
+*.zip
+*.map
+__pycache__/
+test/fixtures/pyproject/.vscode/
+# KeepSafe's local checkpoint store; it belongs to the machine, not the repository.
+.keepsafe/
+# DeepTest's working files are regenerated on every check; the decisions travel with the code.
+.deeptest/*
+!.deeptest/decisions.json
