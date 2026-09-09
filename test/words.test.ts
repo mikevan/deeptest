@@ -2,7 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { scoreLine, summarize, analyzeFile } from '../src/engine/density';
 import { FileCoverage, FileStructure } from '../src/engine/types';
-import { badge, decisionSentence, findingSentence, hoverText, lineCaption, summaryRows, testsSentence, verdict } from '../src/ui/words';
+import { badge, decisionSentence, findingSentence, hoverText, lineCaption, summaryRows, tangleSentence, testsSentence, threeNumbers, verdict } from '../src/ui/words';
 
 const plain = { showNumbers: false };
 const numbers = { showNumbers: true };
@@ -85,18 +85,22 @@ test('verdict: not ready names the untested lines first; ready says what is left
 });
 
 test('summaryRows: plain values, numbers only when asked, hardest function named', () => {
-  const f = analyzeFile(cov('a.py', { 1: ['t'], 2: [], 3: ['t'] }), struct('a.py', { 1: 1, 2: 1, 3: 2 }, [{ name: 'big', startLine: 1, endLine: 9, complexity: 12 }]));
+  const f = analyzeFile(cov('a.py', { 1: ['t'], 2: [], 3: ['t'] }), struct('a.py', { 1: 1, 2: 1, 3: 2 }, [{ name: 'big', startLine: 1, endLine: 9, complexity: 12, cognitive: 7, cognitiveOrdered: 9 }]));
   const s = summarize([f]);
   const rows = summaryRows(s, plain);
   assert.deepEqual(rows.map((r) => r.label), ['Tests reach', 'Lines with enough tests', 'Hardest to test']);
   assert.equal(rows[0].value, '2 of 3 lines (67%). You want 80%.');
   assert.equal(rows[1].value, '1 of 3 (33%). You want 90%.');
-  assert.equal(rows[2].value, 'big() has 12 ways through it. Your limit is 10.');
+  assert.equal(rows[2].value, 'big() has 12 ways through it. Your limit is 10. Its tangle is 7 by the published rule and 9 by your rule.');
   assert.equal(rows[2].ok, false);
   assert.equal(rows[0].numbers, undefined);
   const withNumbers = summaryRows(s, numbers);
   assert.match(withNumbers[2].numbers ?? '', /cyclomatic complexity total 12/);
-  const fine = summarize([analyzeFile(cov('a.py', { 1: ['t'] }), struct('a.py', { 1: 1 }, [{ name: 'f', startLine: 1, endLine: 2, complexity: 2 }]))]);
+  assert.match(withNumbers[2].numbers ?? '', /cognitive complexity max 7 published, 9 ordered-operand/);
+  assert.equal(tangleSentence({ name: 'f', startLine: 1, endLine: 2, complexity: 3, cognitive: 4, cognitiveOrdered: 4 }), 'Its tangle is 4 by both rules.');
+  assert.equal(threeNumbers({ name: 'f', startLine: 1, endLine: 2, complexity: 3, cognitive: 4, cognitiveOrdered: 4 }), '3 ways through, tangle 4');
+  assert.equal(threeNumbers({ name: 'f', startLine: 1, endLine: 2, complexity: 3, cognitive: 4, cognitiveOrdered: 6 }), '3 ways through, tangle 4 / 6');
+  const fine = summarize([analyzeFile(cov('a.py', { 1: ['t'] }), struct('a.py', { 1: 1 }, [{ name: 'f', startLine: 1, endLine: 2, complexity: 2, cognitive: 0, cognitiveOrdered: 0 }]))]);
   assert.equal(summaryRows(fine, plain)[2].value, 'Every function is within your limit of 10 ways through.');
   assert.equal(summaryRows(summarize([]), plain)[2].value, 'No functions measured.');
 });

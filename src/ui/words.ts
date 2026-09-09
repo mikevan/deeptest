@@ -8,7 +8,7 @@
  *
  * Pure. Testable. The screens format; this file decides what is said.
  */
-import { LineResult, Summary } from '../engine/types';
+import { FunctionComplexity, LineResult, Summary } from '../engine/types';
 import { DecisionState } from '../decisions/decisions';
 import { TestRunSummary } from '../languages/types';
 
@@ -155,6 +155,24 @@ export interface SummaryRow {
   numbers?: string;
 }
 
+/**
+ * The second and third numbers for one function, in plain words. "Tangle"
+ * is cognitive complexity: how hard the function is to follow, as opposed
+ * to how many ways there are through it. Two rules are shown side by side
+ * until Michael picks one: the published rule and the ordered-operand rule.
+ */
+export function tangleSentence(fn: FunctionComplexity): string {
+  return fn.cognitive === fn.cognitiveOrdered
+    ? `Its tangle is ${fn.cognitive} by both rules.`
+    : `Its tangle is ${fn.cognitive} by the published rule and ${fn.cognitiveOrdered} by your rule.`;
+}
+
+/** The three numbers, compact, for a list row: "30 ways through, tangle 12 / 15". */
+export function threeNumbers(fn: FunctionComplexity): string {
+  const tangle = fn.cognitive === fn.cognitiveOrdered ? `${fn.cognitive}` : `${fn.cognitive} / ${fn.cognitiveOrdered}`;
+  return `${fn.complexity} ways through, tangle ${tangle}`;
+}
+
 export function summaryRows(summary: Summary, voice: Voice): SummaryRow[] {
   const t = summary.thresholds;
   const hardest = summary.complexFunctions[0];
@@ -174,12 +192,12 @@ export function summaryRows(summary: Summary, voice: Voice): SummaryRow[] {
     {
       label: 'Hardest to test',
       value: hardest
-        ? `${hardest.name}() has ${hardest.complexity} ways through it. Your limit is ${t.maxFunctionComplexity}.`
+        ? `${hardest.name}() has ${hardest.complexity} ways through it. Your limit is ${t.maxFunctionComplexity}. ${tangleSentence(hardest)}`
         : summary.functions === 0
           ? 'No functions measured.'
           : `Every function is within your limit of ${t.maxFunctionComplexity} ways through.`,
       ok: summary.complexityOk,
-      numbers: `cyclomatic complexity total ${summary.totalComplexity}, average ${summary.averageComplexity.toFixed(1)}, max ${summary.maxComplexity}`,
+      numbers: `cyclomatic complexity total ${summary.totalComplexity}, average ${summary.averageComplexity.toFixed(1)}, max ${summary.maxComplexity}; cognitive complexity max ${summary.maxCognitive} published, ${summary.maxCognitiveOrdered} ordered-operand`,
     },
   ];
   if (summary.unreachableLines > 0) {

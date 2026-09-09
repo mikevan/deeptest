@@ -7,8 +7,8 @@
  * "Worst" is the engine's ranking: gap first, then bar. Nothing else.
  */
 import { DecidedFunction, DecidedLine, DecisionState } from '../decisions/decisions';
-import { functionDecisionSentence } from '../ui/words';
-import { AnalysisResult, RouteProgress, Summary } from '../engine/types';
+import { functionDecisionSentence, threeNumbers } from '../ui/words';
+import { AnalysisResult, FunctionComplexity, RouteProgress, Summary } from '../engine/types';
 import { RunInfoLike } from './types';
 import { describeAction, describeMeaning, describeReach, describeRouteSteps } from './plain';
 
@@ -47,7 +47,16 @@ export interface ReportModel {
   /** Functions that carry a fix decision, as one sentence each. */
   functionDecisions: Array<{ path: string; startLine: number; sentence: string }>;
   detailCount: number;
+  /**
+   * The functions with the most ways through, with all three numbers, for
+   * the comparison table. Capped at COMPARE_COUNT so a large project does
+   * not turn the report into a phone book.
+   */
+  compared: Array<FunctionComplexity & { path: string }>;
 }
+
+/** How many functions the comparison table shows. */
+export const COMPARE_COUNT = 30;
 
 export interface ReportInput {
   result: AnalysisResult;
@@ -146,6 +155,7 @@ export function buildReport(input: ReportInput): ReportModel {
     unreachable,
     functionDecisions,
     detailCount,
+    compared: result.summary.measuredFunctions.slice(0, COMPARE_COUNT),
   };
 }
 
@@ -243,11 +253,23 @@ export function renderMarkdown(m: ReportModel): string {
   if (s.complexFunctions.length > 0) {
     out.push(`## Functions harder to test than your limit (${s.complexFunctions.length})`);
     out.push('');
-    out.push(`The number is how many different ways there are through the function. Over ${s.thresholds.maxFunctionComplexity}, it is hard to test fully and hard to change safely.`);
+    out.push(`The first number is how many different ways there are through the function. Over ${s.thresholds.maxFunctionComplexity}, it is hard to test fully and hard to change safely. The tangle is how hard the function is to follow: it charges every break in straight-line flow, and charges more the deeper it is nested. Where two tangle numbers appear, the first is the published rule and the second is your ordered-operand rule.`);
     out.push('');
     for (const fn of s.complexFunctions) {
       const state = m.functionDecisions.find((d) => d.path === fn.path && d.startLine === fn.startLine);
-      out.push(`- \`${fn.name}()\` in ${fn.path} line ${fn.startLine}: ${fn.complexity}${state ? ` (${state.sentence})` : ''}`);
+      out.push(`- \`${fn.name}()\` in ${fn.path} line ${fn.startLine}: ${threeNumbers(fn)}${state ? ` (${state.sentence})` : ''}`);
+    }
+    out.push('');
+  }
+  if (m.compared.length > 0) {
+    out.push(`## Ways through against tangle (${m.compared.length} of ${s.functions} functions)`);
+    out.push('');
+    out.push('The functions with the most ways through, with all three numbers side by side. A high count of ways through and a low tangle is a flat list of choices, such as a switch: long, but not hard to follow. A high tangle with few ways through is deep nesting. Where the two tangle numbers differ, the function has boolean conditions whose order carries meaning. A function\'s tangle includes everything nested inside it, callbacks included, each one level deeper, so a short function that registers many handlers can carry a large tangle.');
+    out.push('');
+    out.push('| Function | Where | Ways through | Tangle, published | Tangle, your rule |');
+    out.push('|---|---|---|---|---|');
+    for (const fn of m.compared) {
+      out.push(`| \`${fn.name}()\` | ${fn.path} line ${fn.startLine} | ${fn.complexity} | ${fn.cognitive} | ${fn.cognitiveOrdered} |`);
     }
     out.push('');
   }

@@ -244,6 +244,11 @@ export function summarize(files: FileResult[], thresholds: Thresholds = DEFAULT_
 
   const totalComplexity = functions.reduce((sum, fn) => sum + fn.complexity, 0);
   const maxComplexity = functions.reduce((max, fn) => Math.max(max, fn.complexity), 0);
+  const maxCognitive = functions.reduce((max, fn) => Math.max(max, fn.cognitive), 0);
+  const maxCognitiveOrdered = functions.reduce((max, fn) => Math.max(max, fn.cognitiveOrdered), 0);
+  const measuredFunctions = [...functions].sort(
+    (a, b) => b.complexity - a.complexity || b.cognitiveOrdered - a.cognitiveOrdered || a.path.localeCompare(b.path) || a.startLine - b.startLine,
+  );
   const complexFunctions = functions
     .filter((fn) => fn.complexity > thresholds.maxFunctionComplexity)
     .sort((a, b) => b.complexity - a.complexity || a.path.localeCompare(b.path) || a.startLine - b.startLine);
@@ -264,6 +269,9 @@ export function summarize(files: FileResult[], thresholds: Thresholds = DEFAULT_
     totalComplexity,
     averageComplexity: functions.length === 0 ? 0 : round(totalComplexity / functions.length),
     maxComplexity,
+    maxCognitive,
+    maxCognitiveOrdered,
+    measuredFunctions,
     complexFunctions,
     unreachableLines,
     declarationLines,

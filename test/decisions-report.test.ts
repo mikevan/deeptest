@@ -39,7 +39,7 @@ function struct(path: string, depth: Record<number, number>, routes: Record<numb
     depth: new Map(Object.entries(depth).map(([k, v]) => [Number(k), v])),
     routes: new Map(Object.entries(routes).map(([k, v]) => [Number(k), v])),
     unreachable: new Set(unreachable),
-    functions: [{ name: 'f', startLine: 1, endLine: 20, complexity: 12 }],
+    functions: [{ name: 'f', startLine: 1, endLine: 20, complexity: 12, cognitive: 5, cognitiveOrdered: 8 }],
     declarations: new Set([1]),
   };
 }
@@ -199,7 +199,10 @@ test('report: worst N in full by the gap ranking, the rest in one line, accepted
   assert.match(md, /\| a\.py \| 4 \| 0 \/ 2 \| 1 of 2 \|/);
   assert.match(md, /Accepted by me on 2026-09-05: covered elsewhere/);
   assert.match(md, /Code that can never run \(1\)/);
-  assert.match(md, /`f\(\)` in a\.py line 1: 12/);
+  assert.match(md, /`f\(\)` in a\.py line 1: 12 ways through, tangle 5 \/ 8/);
+  assert.match(md, /## Ways through against tangle \(1 of 1 functions\)/);
+  assert.match(md, /\| `f\(\)` \| a\.py line 1 \| 12 \| 5 \| 8 \|/);
+  assert.deepEqual(model.compared.map((fn) => fn.name), ['f']);
 });
 
 test('report: verdict is ready when thresholds pass, and says how many lines are still open', () => {
@@ -253,7 +256,7 @@ test('brief: names the line, the bar, the route, where tests stop, nearby tests,
 test('function brief: both modes quote the function, list the short lines, and end with the judge sentence', () => {
   const result = sampleResult();
   const file = result.files[0];
-  const fn = { name: 'f', startLine: 1, endLine: 8, complexity: 5 };
+  const fn = { name: 'f', startLine: 1, endLine: 8, complexity: 5, cognitive: 0, cognitiveOrdered: 0 };
   const source = [1, 2, 3, 4, 5, 6, 7, 8].map((l) => ({ line: l, text: SRC[l] }));
   const testing = buildFunctionBrief({ path: 'a.py', fn, file, source, sourceTruncated: false, limit: 3, testsPath: 'tests', language: 'Python', mode: 'test' });
   assert.match(testing, /^# DeepTest: test every way through f\(\) in a\.py/);
@@ -274,7 +277,7 @@ test('function brief: both modes quote the function, list the short lines, and e
 });
 
 test('function decisions: pinned to the start line, judged by ways over the limit, kept apart from line decisions', () => {
-  const fn = { name: 'f', startLine: 1, endLine: 8, complexity: 5 };
+  const fn = { name: 'f', startLine: 1, endLine: 8, complexity: 5, cognitive: 0, cognitiveOrdered: 0 };
   const d = { path: 'a.py', line: 1, lineHash: hashLine(SRC[1]), kind: 'fix' as const, reason: 'refactor', by: 'mike', at: '2026-09-06T10:00:00Z', gapAtDecision: 2, scope: 'function' as const, functionName: 'f' };
   assert.equal(functionDecisionState(undefined, fn, 3, SRC[1]).kind, 'none');
   assert.deepEqual(functionDecisionState(d, fn, 3, SRC[1]), { kind: 'fix-pending', decision: d, stillShortBy: 2, moved: false });

@@ -33,7 +33,7 @@ test('straight-line function body has depth 0 and the def line is a declaration'
   assert.equal(s.depth.get(1), 0);
   assert.equal(s.depth.get(2), 0);
   assert.equal(s.depth.get(3), 0);
-  assert.deepEqual(s.functions, [{ name: 'f', startLine: 1, endLine: 3, complexity: 1 }]);
+  assert.deepEqual(s.functions, [{ name: 'f', startLine: 1, endLine: 3, complexity: 1, cognitive: 0, cognitiveOrdered: 0 }]);
 });
 
 test('if: the if line and its body share one decision; else is the other half', () => {

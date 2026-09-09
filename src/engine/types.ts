@@ -71,6 +71,18 @@ export interface FunctionComplexity {
   endLine: number;
   /** McCabe cyclomatic complexity: 1 + decisions inside the function. */
   complexity: number;
+  /**
+   * Cognitive complexity as published (Campbell, SonarSource 2018): breaks
+   * in linear flow, charged more the deeper they nest. "Tangle" in the UI.
+   */
+  cognitive: number;
+  /**
+   * Cognitive complexity with the ordered-operand rule for boolean runs:
+   * a run of `and`/`or` costs one per operand when order carries meaning
+   * (a call or assignment inside, or a later operand reaching into a name
+   * an earlier one tested). Equal to `cognitive` when no run is ordered.
+   */
+  cognitiveOrdered: number;
 }
 
 /** Static facts about one file: depth per line, complexity per function. */
@@ -182,6 +194,16 @@ export interface Summary {
   totalComplexity: number;
   averageComplexity: number;
   maxComplexity: number;
+  /** Highest cognitive complexity, published rule, over all functions. */
+  maxCognitive: number;
+  /** Highest cognitive complexity, ordered-operand rule, over all functions. */
+  maxCognitiveOrdered: number;
+  /**
+   * Every measured function with all three numbers, sorted by ways through
+   * (then tangle, then path and line), for comparing the measures side by
+   * side. The verdict uses only `complexFunctions`.
+   */
+  measuredFunctions: Array<FunctionComplexity & { path: string }>;
   /** Functions whose complexity exceeds the threshold, worst first. */
   complexFunctions: Array<FunctionComplexity & { path: string }>;
   unreachableLines: number;

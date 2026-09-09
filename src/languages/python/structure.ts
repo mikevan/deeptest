@@ -43,6 +43,7 @@
  */
 import type { Node, Tree } from 'web-tree-sitter';
 import { DEFAULT_DEPTH_OPTIONS, DepthOptions, FileStructure, FunctionComplexity, RouteStep } from '../../engine/types';
+import { scorePythonFunctions, ScoredFunction } from './cognitive';
 
 export { DEFAULT_DEPTH_OPTIONS };
 export type { DepthOptions };
@@ -69,8 +70,19 @@ class Analyzer {
   readonly unreachable = new Set<number>();
   readonly declarations = new Set<number>();
   readonly functions: FunctionComplexity[] = [];
+  /** The node behind each entry of `functions`, same order, for the cognitive pass. */
+  private readonly functionNodes: ScoredFunction[] = [];
 
   constructor(private readonly options: DepthOptions) {}
+
+  /** Fills in the cognitive numbers once the whole file is known, because recursion cycles need every function. */
+  scoreCognitive(): void {
+    const scores = scorePythonFunctions(this.functionNodes);
+    scores.forEach((score, i) => {
+      this.functions[i].cognitive = score.cognitive;
+      this.functions[i].cognitiveOrdered = score.cognitiveOrdered;
+    });
+  }
 
   private line(node: Node): number {
     return node.startPosition.row + 1;
@@ -323,7 +335,10 @@ class Analyzer {
       startLine: line,
       endLine: stmt.endPosition.row + 1,
       complexity: 1 + this.complexityOf(body),
+      cognitive: 0,
+      cognitiveOrdered: 0,
     });
+    this.functionNodes.push({ name, node: stmt });
     if (body) {
       this.visitBlock(body, [], true);
     }
@@ -612,6 +627,7 @@ class Analyzer {
 export function analyzePythonTree(path: string, tree: Tree, options: DepthOptions = DEFAULT_DEPTH_OPTIONS): FileStructure {
   const analyzer = new Analyzer(options);
   analyzer.analyzeModule(tree.rootNode);
+  analyzer.scoreCognitive();
   return {
     path,
     depth: analyzer.depth,

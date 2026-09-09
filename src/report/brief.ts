@@ -127,6 +127,7 @@ export function buildFunctionBrief(input: FunctionBriefInput): string {
   lines.push('## The function');
   lines.push('');
   lines.push(`\`${fn.name}()\`, ${path} lines ${fn.startLine} to ${fn.endLine}. It has ${fn.complexity} ways through it (cyclomatic complexity ${fn.complexity}); the limit for this project is ${limit}.`);
+  lines.push(`Its cognitive complexity is ${fn.cognitive} by the published rule (Campbell, SonarSource 2018)${fn.cognitive === fn.cognitiveOrdered ? '' : ` and ${fn.cognitiveOrdered} with boolean runs charged one per operand when their order carries meaning`}. Cyclomatic counts forks; cognitive counts how hard the function is to follow, charging nesting more the deeper it goes.`);
   lines.push('');
   lines.push('```');
   for (const c of source) {

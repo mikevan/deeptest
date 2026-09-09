@@ -31,10 +31,14 @@
  */
 import type { Node, Tree } from 'web-tree-sitter';
 import { DEFAULT_DEPTH_OPTIONS, DepthOptions, FileStructure, FunctionComplexity, RouteStep } from '../../engine/types';
+import { scoreTypeScriptFunctions, ScoredFunction } from './cognitive';
 
 const TERMINATORS = new Set(['return_statement', 'throw_statement', 'break_statement', 'continue_statement']);
 const FUNCTION_TYPES = new Set(['function_declaration', 'function_expression', 'arrow_function', 'method_definition', 'generator_function', 'generator_function_declaration', 'function']);
 const CLASS_TYPES = new Set(['class_declaration', 'class', 'abstract_class_declaration']);
+const DECLARATION_STATEMENT_TYPES = new Set(['function_declaration', 'generator_function_declaration', 'class_declaration', 'abstract_class_declaration']);
+const WRAPPED_STATEMENT_TYPES = new Set(['labeled_statement', 'statement_block']);
+const LOOP_STATEMENT_TYPES = new Set(['for_statement', 'for_in_statement', 'while_statement', 'do_statement']);
 const SHORT_CIRCUIT = new Set(['&&', '||', '??']);
 const MAX_CONDITION = 100;
 
@@ -61,8 +65,19 @@ class Analyzer {
   readonly unreachable = new Set<number>();
   readonly declarations = new Set<number>();
   readonly functions: FunctionComplexity[] = [];
+  /** The node behind each entry of `functions`, same order, for the cognitive pass. */
+  private readonly functionNodes: ScoredFunction[] = [];
 
   constructor(private readonly options: DepthOptions) {}
+
+  /** Fills in the cognitive numbers once the whole file is known, because recursion cycles need every function. */
+  scoreCognitive(): void {
+    const scores = scoreTypeScriptFunctions(this.functionNodes);
+    scores.forEach((score, i) => {
+      this.functions[i].cognitive = score.cognitive;
+      this.functions[i].cognitiveOrdered = score.cognitiveOrdered;
+    });
+  }
 
   private line(node: Node): number {
     return node.startPosition.row + 1;
@@ -291,12 +306,16 @@ class Analyzer {
 
   private visitFunction(fn: Node): void {
     const body = fn.childForFieldName('body');
+    const name = this.functionName(fn);
     this.functions.push({
-      name: this.functionName(fn),
+      name,
       startLine: this.line(fn),
       endLine: fn.endPosition.row + 1,
       complexity: 1 + this.complexityOf(body),
+      cognitive: 0,
+      cognitiveOrdered: 0,
     });
+    this.functionNodes.push({ name, node: fn });
     if (!body) {
       return;
     }
@@ -346,153 +365,204 @@ class Analyzer {
     }
   }
 
-  private visitStatement(stmt: Node, route: RouteStep[], inFunction: boolean): void {
+  private exportDeclaration(stmt: Node): Node | null {
+    return stmt.childForFieldName('declaration') ?? stmt.childForFieldName('value');
+  }
+
+  private visitExportStatement(stmt: Node, route: RouteStep[], inFunction: boolean): void {
+    const decl = this.exportDeclaration(stmt);
+    if (decl && (FUNCTION_TYPES.has(decl.type) || CLASS_TYPES.has(decl.type) || decl.type.endsWith('_declaration'))) {
+      this.visitStatement(decl, route, inFunction);
+    } else {
+      this.declare(stmt, inFunction);
+      this.record(stmt, [...route, ...this.exprSteps(stmt, this.line(stmt))], inFunction);
+    }
+  }
+
+  private visitFunctionDeclaration(stmt: Node, route: RouteStep[], inFunction: boolean): void {
+    this.declare(stmt, inFunction);
+    this.record(stmt, [...route, ...this.exprSteps(stmt.childForFieldName('parameters'), this.line(stmt))], false);
+    this.visitFunction(stmt);
+  }
+
+  private visitClassDeclaration(stmt: Node, inFunction: boolean): void {
+    this.declare(stmt, inFunction);
+    this.visitClassBody(stmt.childForFieldName('body'), false);
+  }
+
+  private visitDeclarationStatement(stmt: Node, route: RouteStep[], inFunction: boolean): void {
+    if (stmt.type === 'function_declaration' || stmt.type === 'generator_function_declaration') {
+      this.visitFunctionDeclaration(stmt, route, inFunction);
+    } else {
+      this.visitClassDeclaration(stmt, inFunction);
+    }
+  }
+
+  private visitLabeledStatement(stmt: Node, route: RouteStep[], inFunction: boolean): void {
+    const body = stmt.childForFieldName('body');
+    if (body) {
+      this.visitStatement(body, route, inFunction);
+    }
+  }
+
+  private visitWrappedStatement(stmt: Node, route: RouteStep[], inFunction: boolean): void {
+    if (stmt.type === 'labeled_statement') {
+      this.visitLabeledStatement(stmt, route, inFunction);
+    } else {
+      this.visitBlock(stmt, route, inFunction);
+    }
+  }
+
+  private visitIfStatement(stmt: Node, route: RouteStep[], inFunction: boolean): void {
     const line = this.line(stmt);
-    switch (stmt.type) {
-      case 'export_statement': {
-        const decl = stmt.childForFieldName('declaration') ?? stmt.childForFieldName('value');
-        if (decl && (FUNCTION_TYPES.has(decl.type) || CLASS_TYPES.has(decl.type) || decl.type.endsWith('_declaration'))) {
-          this.visitStatement(decl, route, inFunction);
-        } else {
-          this.declare(stmt, inFunction);
-          this.record(stmt, [...route, ...this.exprSteps(stmt, line)], inFunction);
-        }
-        return;
-      }
-      case 'function_declaration':
-      case 'generator_function_declaration': {
-        this.declare(stmt, inFunction);
-        this.record(stmt, [...route, ...this.exprSteps(stmt.childForFieldName('parameters'), line)], false);
-        this.visitFunction(stmt);
-        return;
-      }
-      case 'class_declaration':
-      case 'abstract_class_declaration': {
-        this.declare(stmt, inFunction);
-        this.visitClassBody(stmt.childForFieldName('body'), false);
-        return;
-      }
-      case 'labeled_statement': {
-        const body = stmt.childForFieldName('body');
-        if (body) {
-          this.visitStatement(body, route, inFunction);
-        }
-        return;
-      }
-      case 'statement_block': {
-        this.visitBlock(stmt, route, inFunction);
-        return;
-      }
-      case 'if_statement': {
-        this.declare(stmt, inFunction);
-        const condition = stmt.childForFieldName('condition');
-        const own = this.conditionSteps(condition, 'if', line, 'is true');
-        this.record(stmt, [...route, ...own], inFunction);
-        this.visitBlock(stmt.childForFieldName('consequence'), [...route, ...own], inFunction);
-        const failed: RouteStep[] = [{ line, kind: 'if', condition: text(unparen(condition)), outcome: 'is false' }];
-        let alt = stmt.childForFieldName('alternative');
-        while (alt) {
-          const altBody = alt.namedChildren.find((c): c is Node => Boolean(c)) ?? null;
-          if (altBody?.type === 'if_statement') {
-            const altLine = this.line(altBody);
-            const altCondition = altBody.childForFieldName('condition');
-            const altOwn = this.conditionSteps(altCondition, 'elif', altLine, 'is true');
-            const altRoute = [...route, ...failed, ...altOwn];
-            this.declare(altBody, inFunction);
-            this.record(altBody, altRoute, inFunction);
-            this.visitBlock(altBody.childForFieldName('consequence'), altRoute, inFunction);
-            failed.push({ line: altLine, kind: 'elif', condition: text(unparen(altCondition)), outcome: 'is false' });
-            alt = altBody.childForFieldName('alternative');
-          } else {
-            const altRoute = [...route, ...failed];
-            this.declare(alt, inFunction);
-            this.record(alt, altRoute, inFunction);
-            this.visitBlock(altBody, altRoute, inFunction);
-            alt = null;
-          }
-        }
-        return;
-      }
-      case 'for_statement':
-      case 'for_in_statement':
-      case 'while_statement':
-      case 'do_statement': {
-        this.declare(stmt, inFunction);
-        let own: RouteStep[];
-        if (stmt.type === 'for_in_statement') {
-          own = [{ line, kind: 'loop', condition: `${text(stmt.childForFieldName('left'))} of ${text(stmt.childForFieldName('right'))}`, outcome: 'has at least one item' }, ...this.exprSteps(stmt.childForFieldName('right'), line)];
-        } else if (stmt.type === 'for_statement') {
-          own = [{ line, kind: 'loop', condition: text(unparen(stmt.childForFieldName('condition'))) || 'for (;;)', outcome: 'is true at least once' }, ...this.exprSteps(stmt.childForFieldName('condition'), line), ...this.exprSteps(stmt.childForFieldName('increment'), line)];
-        } else if (stmt.type === 'while_statement') {
-          own = this.conditionSteps(stmt.childForFieldName('condition'), 'loop', line, 'is true at least once');
-        } else {
-          // do { } while (c): the body runs once regardless; the condition decides repeats.
-          own = [{ line, kind: 'loop', condition: text(unparen(stmt.childForFieldName('condition'))), outcome: 'is true, and separately false' }, ...this.exprSteps(stmt.childForFieldName('condition'), line)];
-        }
-        const inner = [...route, ...own];
-        this.record(stmt, inner, inFunction);
-        this.visitBlock(stmt.childForFieldName('body'), inner, inFunction);
-        return;
-      }
-      case 'switch_statement': {
-        this.declare(stmt, inFunction);
-        const subject = text(unparen(stmt.childForFieldName('value')));
-        this.record(stmt, [...route, ...this.exprSteps(stmt.childForFieldName('value'), line)], inFunction);
-        const body = stmt.childForFieldName('body');
-        if (!body) {
-          return;
-        }
-        const earlier: RouteStep[] = [];
-        for (const clause of body.namedChildren) {
-          if (!clause || (clause.type !== 'switch_case' && clause.type !== 'switch_default')) {
-            continue;
-          }
-          const clauseLine = this.line(clause);
-          let own: RouteStep[];
-          if (clause.type === 'switch_case') {
-            const value = text(clause.childForFieldName('value'));
-            own = [...earlier, { line: clauseLine, kind: 'case', condition: `${subject} is ${value}`, outcome: 'is true' }];
-            this.declare(clause, inFunction);
-            this.record(clause, [...route, ...own], inFunction);
-            this.visitStatements(clause.childrenForFieldName('body').filter((s): s is Node => Boolean(s)), [...route, ...own], inFunction);
-            earlier.push({ line: clauseLine, kind: 'case', condition: `${subject} is ${value}`, outcome: 'is false' });
-          } else {
-            own = [...earlier];
-            this.declare(clause, inFunction);
-            this.record(clause, [...route, ...own], inFunction);
-            this.visitStatements(clause.childrenForFieldName('body').filter((s): s is Node => Boolean(s)), [...route, ...own], inFunction);
-          }
-        }
-        return;
-      }
-      case 'try_statement': {
-        this.declare(stmt, inFunction);
-        this.record(stmt, route, inFunction);
-        this.visitBlock(stmt.childForFieldName('body'), route, inFunction);
-        const handler = stmt.childForFieldName('handler');
-        if (handler) {
-          const caught = text(handler.childForFieldName('parameter')) || 'any error';
-          const own: RouteStep[] = this.options.countExcept ? [{ line: this.line(handler), kind: 'except', condition: caught, outcome: 'is thrown inside the try' }] : [];
-          this.declare(handler, inFunction);
-          this.record(handler, [...route, ...own], inFunction);
-          this.visitBlock(handler.childForFieldName('body'), [...route, ...own], inFunction);
-        }
-        const finalizer = stmt.childForFieldName('finalizer');
-        if (finalizer) {
-          this.declare(finalizer, inFunction);
-          this.record(finalizer, route, inFunction);
-          this.visitBlock(finalizer.childForFieldName('body'), route, inFunction);
-        }
-        return;
-      }
-      default: {
-        // Simple statement: expression, declaration, return, throw, import...
-        this.declare(stmt, inFunction);
-        this.record(stmt, [...route, ...this.exprSteps(stmt, line)], inFunction);
-        this.visitNestedFunctions(stmt);
-        return;
+    this.declare(stmt, inFunction);
+    const condition = stmt.childForFieldName('condition');
+    const own = this.conditionSteps(condition, 'if', line, 'is true');
+    this.record(stmt, [...route, ...own], inFunction);
+    this.visitBlock(stmt.childForFieldName('consequence'), [...route, ...own], inFunction);
+    const failed: RouteStep[] = [{ line, kind: 'if', condition: text(unparen(condition)), outcome: 'is false' }];
+    let alt = stmt.childForFieldName('alternative');
+    while (alt) {
+      const altBody = alt.namedChildren.find((child): child is Node => Boolean(child)) ?? null;
+      if (altBody?.type === 'if_statement') {
+        const altLine = this.line(altBody);
+        const altCondition = altBody.childForFieldName('condition');
+        const altOwn = this.conditionSteps(altCondition, 'elif', altLine, 'is true');
+        const altRoute = [...route, ...failed, ...altOwn];
+        this.declare(altBody, inFunction);
+        this.record(altBody, altRoute, inFunction);
+        this.visitBlock(altBody.childForFieldName('consequence'), altRoute, inFunction);
+        failed.push({ line: altLine, kind: 'elif', condition: text(unparen(altCondition)), outcome: 'is false' });
+        alt = altBody.childForFieldName('alternative');
+      } else {
+        const altRoute = [...route, ...failed];
+        this.declare(alt, inFunction);
+        this.record(alt, altRoute, inFunction);
+        this.visitBlock(altBody, altRoute, inFunction);
+        alt = null;
       }
     }
+  }
+
+  private visitLoopStatement(stmt: Node, route: RouteStep[], inFunction: boolean): void {
+    const line = this.line(stmt);
+    this.declare(stmt, inFunction);
+    let own: RouteStep[];
+    if (stmt.type === 'for_in_statement') {
+      own = [{ line, kind: 'loop', condition: `${text(stmt.childForFieldName('left'))} of ${text(stmt.childForFieldName('right'))}`, outcome: 'has at least one item' }, ...this.exprSteps(stmt.childForFieldName('right'), line)];
+    } else if (stmt.type === 'for_statement') {
+      own = [{ line, kind: 'loop', condition: text(unparen(stmt.childForFieldName('condition'))) || 'for (;;)', outcome: 'is true at least once' }, ...this.exprSteps(stmt.childForFieldName('condition'), line), ...this.exprSteps(stmt.childForFieldName('increment'), line)];
+    } else if (stmt.type === 'while_statement') {
+      own = this.conditionSteps(stmt.childForFieldName('condition'), 'loop', line, 'is true at least once');
+    } else {
+      // do { } while (c): the body runs once regardless; the condition decides repeats.
+      own = [{ line, kind: 'loop', condition: text(unparen(stmt.childForFieldName('condition'))), outcome: 'is true, and separately false' }, ...this.exprSteps(stmt.childForFieldName('condition'), line)];
+    }
+    const inner = [...route, ...own];
+    this.record(stmt, inner, inFunction);
+    this.visitBlock(stmt.childForFieldName('body'), inner, inFunction);
+  }
+
+  private visitSwitchClause(clause: Node, subject: string, route: RouteStep[], earlier: RouteStep[], inFunction: boolean): void {
+    const line = this.line(clause);
+    let own: RouteStep[];
+    if (clause.type === 'switch_case') {
+      const value = text(clause.childForFieldName('value'));
+      own = [...earlier, { line, kind: 'case', condition: `${subject} is ${value}`, outcome: 'is true' }];
+      this.declare(clause, inFunction);
+      this.record(clause, [...route, ...own], inFunction);
+      this.visitStatements(clause.childrenForFieldName('body').filter((stmt): stmt is Node => Boolean(stmt)), [...route, ...own], inFunction);
+      earlier.push({ line, kind: 'case', condition: `${subject} is ${value}`, outcome: 'is false' });
+    } else {
+      own = [...earlier];
+      this.declare(clause, inFunction);
+      this.record(clause, [...route, ...own], inFunction);
+      this.visitStatements(clause.childrenForFieldName('body').filter((stmt): stmt is Node => Boolean(stmt)), [...route, ...own], inFunction);
+    }
+  }
+
+  private isSwitchClause(node: Node | null | undefined): node is Node {
+    return Boolean(node) && (node!.type === 'switch_case' || node!.type === 'switch_default');
+  }
+
+  private visitSwitchStatement(stmt: Node, route: RouteStep[], inFunction: boolean): void {
+    const line = this.line(stmt);
+    this.declare(stmt, inFunction);
+    const subject = text(unparen(stmt.childForFieldName('value')));
+    this.record(stmt, [...route, ...this.exprSteps(stmt.childForFieldName('value'), line)], inFunction);
+    const body = stmt.childForFieldName('body');
+    if (!body) {
+      return;
+    }
+    const earlier: RouteStep[] = [];
+    for (const clause of body.namedChildren) {
+      if (!this.isSwitchClause(clause)) {
+        continue;
+      }
+      this.visitSwitchClause(clause, subject, route, earlier, inFunction);
+    }
+  }
+
+  private visitTryStatement(stmt: Node, route: RouteStep[], inFunction: boolean): void {
+    this.declare(stmt, inFunction);
+    this.record(stmt, route, inFunction);
+    this.visitBlock(stmt.childForFieldName('body'), route, inFunction);
+    const handler = stmt.childForFieldName('handler');
+    if (handler) {
+      const caught = text(handler.childForFieldName('parameter')) || 'any error';
+      const own: RouteStep[] = this.options.countExcept ? [{ line: this.line(handler), kind: 'except', condition: caught, outcome: 'is thrown inside the try' }] : [];
+      this.declare(handler, inFunction);
+      this.record(handler, [...route, ...own], inFunction);
+      this.visitBlock(handler.childForFieldName('body'), [...route, ...own], inFunction);
+    }
+    const finalizer = stmt.childForFieldName('finalizer');
+    if (finalizer) {
+      this.declare(finalizer, inFunction);
+      this.record(finalizer, route, inFunction);
+      this.visitBlock(finalizer.childForFieldName('body'), route, inFunction);
+    }
+  }
+
+  private visitSimpleStatement(stmt: Node, route: RouteStep[], inFunction: boolean): void {
+    this.declare(stmt, inFunction);
+    this.record(stmt, [...route, ...this.exprSteps(stmt, this.line(stmt))], inFunction);
+    this.visitNestedFunctions(stmt);
+  }
+
+  private visitTryOrSimpleStatement(stmt: Node, route: RouteStep[], inFunction: boolean): void {
+    if (stmt.type === 'try_statement') {
+      this.visitTryStatement(stmt, route, inFunction);
+    } else {
+      this.visitSimpleStatement(stmt, route, inFunction);
+    }
+  }
+
+  private visitControlStatement(stmt: Node, route: RouteStep[], inFunction: boolean): void {
+    if (stmt.type === 'if_statement') {
+      this.visitIfStatement(stmt, route, inFunction);
+    } else if (LOOP_STATEMENT_TYPES.has(stmt.type)) {
+      this.visitLoopStatement(stmt, route, inFunction);
+    } else if (stmt.type === 'switch_statement') {
+      this.visitSwitchStatement(stmt, route, inFunction);
+    } else {
+      this.visitTryOrSimpleStatement(stmt, route, inFunction);
+    }
+  }
+
+  private visitStatement(stmt: Node, route: RouteStep[], inFunction: boolean): void {
+    if (stmt.type === 'export_statement') {
+      this.visitExportStatement(stmt, route, inFunction);
+      return;
+    }
+    if (DECLARATION_STATEMENT_TYPES.has(stmt.type)) {
+      this.visitDeclarationStatement(stmt, route, inFunction);
+      return;
+    }
+    if (WRAPPED_STATEMENT_TYPES.has(stmt.type)) {
+      this.visitWrappedStatement(stmt, route, inFunction);
+      return;
+    }
+    this.visitControlStatement(stmt, route, inFunction);
   }
 
   private complexityOf(node: Node | null): number {
@@ -537,6 +607,7 @@ class Analyzer {
 export function analyzeTypeScriptTree(path: string, tree: Tree, options: DepthOptions = DEFAULT_DEPTH_OPTIONS): FileStructure {
   const analyzer = new Analyzer(options);
   analyzer.analyzeProgram(tree.rootNode);
+  analyzer.scoreCognitive();
   return {
     path,
     depth: analyzer.depth,

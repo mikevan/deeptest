@@ -136,8 +136,8 @@ test('analyzeFile: a scored line that ran only at import time is covered but unt
 test('analyzeFile: functions are returned sorted by start line', () => {
   const c = cov('a.py', {});
   const s = struct('a.py', {}, [], [
-    { name: 'b', startLine: 10, endLine: 12, complexity: 1 },
-    { name: 'a', startLine: 1, endLine: 5, complexity: 3 },
+    { name: 'b', startLine: 10, endLine: 12, complexity: 1, cognitive: 0, cognitiveOrdered: 0 },
+    { name: 'a', startLine: 1, endLine: 5, complexity: 3, cognitive: 0, cognitiveOrdered: 0 },
   ]);
   assert.deepEqual(analyzeFile(c, s).functions.map((fn) => fn.name), ['a', 'b']);
 });
@@ -268,13 +268,13 @@ test('summarize: thresholds fail when not met', () => {
 
 test('summarize: complexity totals and over-threshold functions sorted worst first with stable tie-breaks', () => {
   const a = analyzeFile(cov('a.py', {}), struct('a.py', {}, [], [
-    { name: 'low', startLine: 1, endLine: 3, complexity: 2 },
-    { name: 'high2', startLine: 20, endLine: 30, complexity: 12 },
-    { name: 'high1', startLine: 5, endLine: 15, complexity: 12 },
+    { name: 'low', startLine: 1, endLine: 3, complexity: 2, cognitive: 9, cognitiveOrdered: 11 },
+    { name: 'high2', startLine: 20, endLine: 30, complexity: 12, cognitive: 1, cognitiveOrdered: 4 },
+    { name: 'high1', startLine: 5, endLine: 15, complexity: 12, cognitive: 1, cognitiveOrdered: 1 },
   ]));
   const b = analyzeFile(cov('b.py', {}), struct('b.py', {}, [], [
-    { name: 'worst', startLine: 1, endLine: 50, complexity: 20 },
-    { name: 'also12', startLine: 60, endLine: 70, complexity: 12 },
+    { name: 'worst', startLine: 1, endLine: 50, complexity: 20, cognitive: 0, cognitiveOrdered: 0 },
+    { name: 'also12', startLine: 60, endLine: 70, complexity: 12, cognitive: 0, cognitiveOrdered: 0 },
   ]));
   const s = summarize([a, b]);
   assert.equal(s.functions, 5);
@@ -283,10 +283,15 @@ test('summarize: complexity totals and over-threshold functions sorted worst fir
   assert.equal(s.maxComplexity, 20);
   assert.equal(s.complexityOk, false);
   assert.deepEqual(s.complexFunctions.map((fn) => `${fn.path}:${fn.name}`), ['b.py:worst', 'a.py:high1', 'a.py:high2', 'b.py:also12']);
+  // The comparison list holds every function, by ways through, then by ordered tangle, then path and line.
+  // A deep but flat-forked function (low) stays at the bottom: the verdict is on ways through; the tangle is beside it.
+  assert.deepEqual(s.measuredFunctions.map((fn) => fn.name), ['worst', 'high2', 'high1', 'also12', 'low']);
+  assert.equal(s.maxCognitive, 9);
+  assert.equal(s.maxCognitiveOrdered, 11);
 });
 
 test('summarize: complexity passes when every function is within threshold', () => {
-  const a = analyzeFile(cov('a.py', {}), struct('a.py', {}, [], [{ name: 'f', startLine: 1, endLine: 2, complexity: 10 }]));
+  const a = analyzeFile(cov('a.py', {}), struct('a.py', {}, [], [{ name: 'f', startLine: 1, endLine: 2, complexity: 10, cognitive: 0, cognitiveOrdered: 0 }]));
   assert.equal(summarize([a]).complexityOk, true);
 });
 

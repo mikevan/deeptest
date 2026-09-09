@@ -37,7 +37,7 @@ test('straight-line function: body depth 0, def line is a declaration', () => {
   assert.deepEqual(Array.from(s.declarations), [1]);
   assert.equal(s.depth.get(2), 0);
   assert.equal(s.depth.get(3), 0);
-  assert.deepEqual(s.functions, [{ name: 'f', startLine: 1, endLine: 4, complexity: 1 }]);
+  assert.deepEqual(s.functions, [{ name: 'f', startLine: 1, endLine: 4, complexity: 1, cognitive: 0, cognitiveOrdered: 0 }]);
 });
 
 test('if / else if / else: cumulative like Python, else carries the earlier branches', () => {
