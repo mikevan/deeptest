@@ -201,6 +201,7 @@ test('report: worst N in full by the gap ranking, the rest in one line, accepted
   assert.match(md, /Code that can never run \(1\)/);
   assert.match(md, /`f\(\)` in a\.py line 1: 12 ways through, tangle 5 \/ 8/);
   assert.match(md, /## Ways through against tangle \(1 of 1 functions\)/);
+  assert.match(md, /\| Function \| Where \| Ways through \| Tangle \(Campbell\) \| Tangle \(MBCC\) \|/);
   assert.match(md, /\| `f\(\)` \| a\.py line 1 \| 12 \| 5 \| 8 \|/);
   assert.deepEqual(model.compared.map((fn) => fn.name), ['f']);
 });

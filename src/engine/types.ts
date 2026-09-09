@@ -77,7 +77,7 @@ export interface FunctionComplexity {
    */
   cognitive: number;
   /**
-   * Cognitive complexity with the ordered-operand rule for boolean runs:
+   * MikeVan's Better Cognitive Complexity (MBCC): cognitive complexity where
    * a run of `and`/`or` costs one per operand when order carries meaning
    * (a call or assignment inside, or a later operand reaching into a name
    * an earlier one tested). Equal to `cognitive` when no run is ordered.
@@ -194,9 +194,9 @@ export interface Summary {
   totalComplexity: number;
   averageComplexity: number;
   maxComplexity: number;
-  /** Highest cognitive complexity, published rule, over all functions. */
+  /** Highest Cognitive Complexity (Campbell) over all functions. */
   maxCognitive: number;
-  /** Highest cognitive complexity, ordered-operand rule, over all functions. */
+  /** Highest MBCC over all functions. */
   maxCognitiveOrdered: number;
   /**
    * Every measured function with all three numbers, sorted by ways through

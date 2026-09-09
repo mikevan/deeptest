@@ -463,3 +463,15 @@ bogus option gets the failure sentence, not a result.
 Lesson recorded for the tool itself: a measurement of test rigour must
 refuse to produce a number from a run in which no test ran. The old
 behaviour was worse than no tool, because 6% looked like a fact.
+
+## The measure has a name (0.3.9)
+
+The ordered-operand variant of Cognitive Complexity is MikeVan's Better
+Cognitive Complexity, MBCC for short, everywhere a person reads it: the
+"Hardest to test" row ("Its tangle is 39 by Campbell and 45 by MBCC."),
+the over-limit list, the report's comparison table ("Tangle (Campbell)",
+"Tangle (MBCC)"), the Markdown export, and the refactor brief. Campbell's
+figure keeps her name for the same reason: a reader can look either one
+up. Nothing in the arithmetic changed; field names (`cognitive`,
+`cognitiveOrdered`) stay, since the scorer is about to move into a shared
+package and the rename of code identifiers belongs there.

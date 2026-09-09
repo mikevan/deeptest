@@ -25,8 +25,9 @@
  * Two numbers come out of one walk:
  *
  *   published  the whitepaper's rule for boolean runs: one per run
- *   ordered    Michael's departure (RefactorIt spec, draft 3): a run counts
- *              one only when its operands are independent and pure. When
+ *   ordered    MikeVan's Better Cognitive Complexity, MBCC (RefactorIt spec,
+ *              draft 3): a run counts one only when its operands are
+ *              independent and pure. When
  *              order carries meaning, it counts one per operand, because
  *              the reader must understand the short-circuit to understand
  *              the code. Order carries meaning when any operand contains a
@@ -41,7 +42,7 @@ import type { Node } from 'web-tree-sitter';
 export interface CognitiveScore {
   /** Cognitive complexity as published. */
   cognitive: number;
-  /** Cognitive complexity with the ordered-operand rule for boolean runs. */
+  /** MikeVan's Better Cognitive Complexity (MBCC): the ordered-operand rule for boolean runs. */
   cognitiveOrdered: number;
 }
 
@@ -125,7 +126,7 @@ export class CognitiveCounter {
   }
 
   /**
-   * Michael's rule. A run of operands is ordered when any operand is
+   * The MBCC rule. A run of operands is ordered when any operand is
    * impure, or when a later operand reaches into a name that an earlier
    * operand mentioned: `m is not None and m.dues is not None` is ordered,
    * `is_active and is_paid and is_adult` is not.

@@ -2,7 +2,7 @@
 
 Updated 2026-09-09. Companion to vscode-density-extension-spec.md.
 
-## What exists (v0.3.8)
+## What exists (v0.3.9)
 
 - One language contract (src/languages/types.ts) and a registry. Nothing
   above the contract names a language. Proven by grep and by the integration
@@ -23,7 +23,7 @@ Updated 2026-09-09. Companion to vscode-density-extension-spec.md.
   never acts on a shortfall by itself and never accepts a fix.
 - Three numbers per function: ways through (cyclomatic, drives the
   verdict), tangle by the published cognitive complexity rule, and tangle
-  by the ordered-operand rule. Shown beside each other on the "Hardest to
+  by MikeVan's Better Cognitive Complexity (MBCC), the ordered-operand rule. Shown beside each other on the "Hardest to
   test" row, on every over-limit function, and in the report's "Ways
   through against tangle" table. See the engineering notes.
 - 205 unit tests under Vitest; 2 integration suites; the extension measures
@@ -36,7 +36,7 @@ cd C:\workspace\DeepTest
 npm install
 npm test                                        # 205 tests
 npm run build                                   # dist/extension.js, wasm grammars, runner hooks
-npx @vscode/vsce package --no-dependencies      # deeptest-0.3.8.vsix
+npx @vscode/vsce package --no-dependencies      # deeptest-0.3.9.vsix
 ```
 
 Then, in VS Code: Extensions view (Ctrl+Shift+X), the "..." button at the

@@ -1,8 +1,8 @@
 /**
  * Cognitive Complexity, checked against the rules and worked examples in
  * Campbell, "Cognitive Complexity: A New Way of Measuring Understandability",
- * SonarSource, 2018, and against the ordered-operand rule from the
- * RefactorIt spec. Each test names the rule it pins down.
+ * SonarSource, 2018, and against MikeVan's Better Cognitive Complexity
+ * (MBCC), the ordered-operand rule from the RefactorIt spec. Each test names the rule it pins down.
  */
 import { beforeAll, test } from 'vitest';
 import assert from 'node:assert/strict';
@@ -90,28 +90,28 @@ test('py: parentheses and not start a fresh sequence', () => {
   assert.deepEqual(pyScore('def f(a, b, c):\n    return a and not (b or c)\n'), [3, 2, 2]);
 });
 
-test('py: ordered rule: independent pure operands still cost one', () => {
+test('py: MBCC: independent pure operands still cost one', () => {
   assert.deepEqual(pyScore('def f(a, b, c):\n    if a > 0 and b > 0 and c > 0:\n        return 1\n    return 0\n'), [4, 2, 2]);
 });
 
-test('py: ordered rule: a later operand reaching into a name an earlier one tested costs one per operand', () => {
+test('py: MBCC: a later operand reaching into a name an earlier one tested costs one per operand', () => {
   // member is not None and member.dues is not None and member.dues.paid > cutoff
   // published: if +1, one run +1 = 2. ordered: if +1, three operands +3 = 4.
   const src = 'def f(member, cutoff):\n    if member is not None and member.dues is not None and member.dues.paid > cutoff:\n        return 1\n    return 0\n';
   assert.deepEqual(pyScore(src), [4, 2, 4]);
 });
 
-test('py: ordered rule: a call anywhere in the run makes it ordered', () => {
+test('py: MBCC: a call anywhere in the run makes it ordered', () => {
   const src = 'def f(xs):\n    if xs and len(xs) > 3:\n        return 1\n    return 0\n';
   assert.deepEqual(pyScore(src), [3, 2, 3]);
 });
 
-test('py: ordered rule: a walrus makes it ordered', () => {
+test('py: MBCC: a walrus makes it ordered', () => {
   const src = 'def f(xs):\n    if xs and (n := count(xs)):\n        return n\n    return 0\n';
   assert.deepEqual(pyScore(src), [3, 2, 3]);
 });
 
-test('py: ordered rule applies per run, not per expression', () => {
+test('py: MBCC applies per run, not per expression', () => {
   // (m and m.x) or flag: the and-run is ordered (2), the or-run is independent (1). Published 2, ordered 3.
   const src = 'def f(m, flag):\n    return (m and m.x) or flag\n';
   assert.deepEqual(pyScore(src), [3, 2, 3]);
@@ -184,7 +184,7 @@ test('ts: whitepaper boolean runs, and ?? costs nothing', () => {
   assert.deepEqual(tsScore('function f(a, b, c) {\n  return a && !(b || c);\n}\n'), [3, 2, 2]);
 });
 
-test('ts: ordered rule with this-rooted member access and calls', () => {
+test('ts: MBCC with this-rooted member access and calls', () => {
   // pure independent: published 1, ordered 1
   assert.deepEqual(tsScore('function f(a, b, c) {\n  return a > 0 && b > 0 && c > 0;\n}\n'), [3, 1, 1]);
   // user && user.profile && user.profile.name: ordered 3

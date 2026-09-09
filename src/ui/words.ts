@@ -155,16 +155,22 @@ export interface SummaryRow {
   numbers?: string;
 }
 
+/** The name of the ordered-operand measure, long form for a first mention and short form after. */
+export const MBCC = 'MBCC';
+export const MBCC_LONG = "MikeVan's Better Cognitive Complexity";
+
 /**
  * The second and third numbers for one function, in plain words. "Tangle"
  * is cognitive complexity: how hard the function is to follow, as opposed
- * to how many ways there are through it. Two rules are shown side by side
- * until Michael picks one: the published rule and the ordered-operand rule.
+ * to how many ways there are through it. Two measures are shown side by
+ * side: Campbell's published Cognitive Complexity, and MikeVan's Better
+ * Cognitive Complexity (MBCC), which charges a run of and/or one per
+ * operand when the order of the operands carries meaning.
  */
 export function tangleSentence(fn: FunctionComplexity): string {
   return fn.cognitive === fn.cognitiveOrdered
-    ? `Its tangle is ${fn.cognitive} by both rules.`
-    : `Its tangle is ${fn.cognitive} by the published rule and ${fn.cognitiveOrdered} by your rule.`;
+    ? `Its tangle is ${fn.cognitive} by Campbell and by ${MBCC}.`
+    : `Its tangle is ${fn.cognitive} by Campbell and ${fn.cognitiveOrdered} by ${MBCC}.`;
 }
 
 /** The three numbers, compact, for a list row: "30 ways through, tangle 12 / 15". */
@@ -197,7 +203,7 @@ export function summaryRows(summary: Summary, voice: Voice): SummaryRow[] {
           ? 'No functions measured.'
           : `Every function is within your limit of ${t.maxFunctionComplexity} ways through.`,
       ok: summary.complexityOk,
-      numbers: `cyclomatic complexity total ${summary.totalComplexity}, average ${summary.averageComplexity.toFixed(1)}, max ${summary.maxComplexity}; cognitive complexity max ${summary.maxCognitive} published, ${summary.maxCognitiveOrdered} ordered-operand`,
+      numbers: `cyclomatic complexity total ${summary.totalComplexity}, average ${summary.averageComplexity.toFixed(1)}, max ${summary.maxComplexity}; cognitive complexity max ${summary.maxCognitive} (Campbell), ${summary.maxCognitiveOrdered} (${MBCC})`,
     },
   ];
   if (summary.unreachableLines > 0) {

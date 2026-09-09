@@ -253,7 +253,7 @@ export function renderMarkdown(m: ReportModel): string {
   if (s.complexFunctions.length > 0) {
     out.push(`## Functions harder to test than your limit (${s.complexFunctions.length})`);
     out.push('');
-    out.push(`The first number is how many different ways there are through the function. Over ${s.thresholds.maxFunctionComplexity}, it is hard to test fully and hard to change safely. The tangle is how hard the function is to follow: it charges every break in straight-line flow, and charges more the deeper it is nested. Where two tangle numbers appear, the first is the published rule and the second is your ordered-operand rule.`);
+    out.push(`The first number is how many different ways there are through the function. Over ${s.thresholds.maxFunctionComplexity}, it is hard to test fully and hard to change safely. The tangle is how hard the function is to follow: it charges every break in straight-line flow, and charges more the deeper it is nested. Where two tangle numbers appear, the first is Campbell's published Cognitive Complexity and the second is MikeVan's Better Cognitive Complexity (MBCC), which charges a chain of and/or one per operand when the order of the operands carries meaning.`);
     out.push('');
     for (const fn of s.complexFunctions) {
       const state = m.functionDecisions.find((d) => d.path === fn.path && d.startLine === fn.startLine);
@@ -264,9 +264,9 @@ export function renderMarkdown(m: ReportModel): string {
   if (m.compared.length > 0) {
     out.push(`## Ways through against tangle (${m.compared.length} of ${s.functions} functions)`);
     out.push('');
-    out.push('The functions with the most ways through, with all three numbers side by side. A high count of ways through and a low tangle is a flat list of choices, such as a switch: long, but not hard to follow. A high tangle with few ways through is deep nesting. Where the two tangle numbers differ, the function has boolean conditions whose order carries meaning. A function\'s tangle includes everything nested inside it, callbacks included, each one level deeper, so a short function that registers many handlers can carry a large tangle.');
+    out.push('The functions with the most ways through, with all three numbers side by side. A high count of ways through and a low tangle is a flat list of choices, such as a switch: long, but not hard to follow. A high tangle with few ways through is deep nesting. Where the Campbell and MBCC numbers differ, the function has boolean conditions whose order carries meaning. A function\'s tangle includes everything nested inside it, callbacks included, each one level deeper, so a short function that registers many handlers can carry a large tangle.');
     out.push('');
-    out.push('| Function | Where | Ways through | Tangle, published | Tangle, your rule |');
+    out.push('| Function | Where | Ways through | Tangle (Campbell) | Tangle (MBCC) |');
     out.push('|---|---|---|---|---|');
     for (const fn of m.compared) {
       out.push(`| \`${fn.name}()\` | ${fn.path} line ${fn.startLine} | ${fn.complexity} | ${fn.cognitive} | ${fn.cognitiveOrdered} |`);

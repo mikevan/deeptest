@@ -14,15 +14,15 @@ npm run build
 npx @vscode/vsce package --no-dependencies
 ```
 
-The last command prints "DONE  Packaged: C:\workspace\DeepTest\deeptest-0.3.8.vsix".
+The last command prints "DONE  Packaged: C:\workspace\DeepTest\deeptest-0.3.9.vsix".
 Then, in VS Code, press Ctrl+Shift+X to open the Extensions view. At the top
 right of that view click the "..." button (its tooltip reads "Views and More
 Actions..."), choose "Install from VSIX...", pick
-`C:\workspace\DeepTest\deeptest-0.3.8.vsix`, and click "Install". A
+`C:\workspace\DeepTest\deeptest-0.3.9.vsix`, and click "Install". A
 notification says "Completed installing DeepTest extension from VSIX." and
 offers "Restart Extensions"; click it. The DeepTest icon appears in the
 activity bar on the left, and the panel's title bar reads "DeepTest" followed
-by the build number, for example "DeepTest 0.3.8". Repeat these steps after every change to the
+by the build number, for example "DeepTest 0.3.9". Repeat these steps after every change to the
 source. The version number on DeepTest's page in the Extensions view tells
 you which build is running.
 

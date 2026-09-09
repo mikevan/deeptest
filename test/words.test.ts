@@ -91,13 +91,13 @@ test('summaryRows: plain values, numbers only when asked, hardest function named
   assert.deepEqual(rows.map((r) => r.label), ['Tests reach', 'Lines with enough tests', 'Hardest to test']);
   assert.equal(rows[0].value, '2 of 3 lines (67%). You want 80%.');
   assert.equal(rows[1].value, '1 of 3 (33%). You want 90%.');
-  assert.equal(rows[2].value, 'big() has 12 ways through it. Your limit is 10. Its tangle is 7 by the published rule and 9 by your rule.');
+  assert.equal(rows[2].value, 'big() has 12 ways through it. Your limit is 10. Its tangle is 7 by Campbell and 9 by MBCC.');
   assert.equal(rows[2].ok, false);
   assert.equal(rows[0].numbers, undefined);
   const withNumbers = summaryRows(s, numbers);
   assert.match(withNumbers[2].numbers ?? '', /cyclomatic complexity total 12/);
-  assert.match(withNumbers[2].numbers ?? '', /cognitive complexity max 7 published, 9 ordered-operand/);
-  assert.equal(tangleSentence({ name: 'f', startLine: 1, endLine: 2, complexity: 3, cognitive: 4, cognitiveOrdered: 4 }), 'Its tangle is 4 by both rules.');
+  assert.match(withNumbers[2].numbers ?? '', /cognitive complexity max 7 \(Campbell\), 9 \(MBCC\)/);
+  assert.equal(tangleSentence({ name: 'f', startLine: 1, endLine: 2, complexity: 3, cognitive: 4, cognitiveOrdered: 4 }), 'Its tangle is 4 by Campbell and by MBCC.');
   assert.equal(threeNumbers({ name: 'f', startLine: 1, endLine: 2, complexity: 3, cognitive: 4, cognitiveOrdered: 4 }), '3 ways through, tangle 4');
   assert.equal(threeNumbers({ name: 'f', startLine: 1, endLine: 2, complexity: 3, cognitive: 4, cognitiveOrdered: 6 }), '3 ways through, tangle 4 / 6');
   const fine = summarize([analyzeFile(cov('a.py', { 1: ['t'] }), struct('a.py', { 1: 1 }, [{ name: 'f', startLine: 1, endLine: 2, complexity: 2, cognitive: 0, cognitiveOrdered: 0 }]))]);
