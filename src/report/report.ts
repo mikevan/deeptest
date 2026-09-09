@@ -269,7 +269,7 @@ export function renderMarkdown(m: ReportModel): string {
     out.push('| Function | Where | Ways through | Tangle (Campbell) | Tangle (MBCC) |');
     out.push('|---|---|---|---|---|');
     for (const fn of m.compared) {
-      out.push(`| \`${fn.name}()\` | ${fn.path} line ${fn.startLine} | ${fn.complexity} | ${fn.cognitive} | ${fn.cognitiveOrdered} |`);
+      out.push(`| \`${fn.name}()\` | ${fn.path} line ${fn.startLine} | ${fn.complexity} | ${fn.campbell} | ${fn.mbcc} |`);
     }
     out.push('');
   }

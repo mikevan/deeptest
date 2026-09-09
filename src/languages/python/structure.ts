@@ -33,17 +33,15 @@
  * Depth restarts at 0 inside every function body. A nested function is
  * reached by being called, not by the decisions around its def.
  *
- * Cyclomatic complexity is McCabe's: 1 + every branch point in the function,
- * nested functions excluded. It always counts short circuits, ternaries, and
- * comprehension clauses, whatever the depth flags say, because CC is a
- * published number and depth is Michael's.
+ * Cyclomatic complexity, Cognitive Complexity, and MBCC per function come
+ * from @projectrevivesolutions/complexity, filled in after the walk.
  *
  * Statement lines are the statement's FIRST line, because that is where
  * coverage.py attributes a multi-line statement.
  */
 import type { Node, Tree } from 'web-tree-sitter';
 import { DEFAULT_DEPTH_OPTIONS, DepthOptions, FileStructure, FunctionComplexity, RouteStep } from '../../engine/types';
-import { scorePythonFunctions, ScoredFunction } from './cognitive';
+import { MeasuredFunction, measurePython } from '@projectrevivesolutions/complexity';
 
 export { DEFAULT_DEPTH_OPTIONS };
 export type { DepthOptions };
@@ -71,16 +69,20 @@ class Analyzer {
   readonly declarations = new Set<number>();
   readonly functions: FunctionComplexity[] = [];
   /** The node behind each entry of `functions`, same order, for the cognitive pass. */
-  private readonly functionNodes: ScoredFunction[] = [];
+  private readonly functionNodes: MeasuredFunction[] = [];
 
   constructor(private readonly options: DepthOptions) {}
 
-  /** Fills in the cognitive numbers once the whole file is known, because recursion cycles need every function. */
-  scoreCognitive(): void {
-    const scores = scorePythonFunctions(this.functionNodes);
-    scores.forEach((score, i) => {
-      this.functions[i].cognitive = score.cognitive;
-      this.functions[i].cognitiveOrdered = score.cognitiveOrdered;
+  /**
+   * Fills in all three numbers once the whole file is known (recursion
+   * cycles need every function). The measures come from
+   * @projectrevivesolutions/complexity, the one scorer every PRS tool uses.
+   */
+  measure(): void {
+    measurePython(this.functionNodes).forEach((m, i) => {
+      this.functions[i].complexity = m.cyclomatic;
+      this.functions[i].campbell = m.campbell;
+      this.functions[i].mbcc = m.mbcc;
     });
   }
 
@@ -334,9 +336,9 @@ class Analyzer {
       name,
       startLine: line,
       endLine: stmt.endPosition.row + 1,
-      complexity: 1 + this.complexityOf(body),
-      cognitive: 0,
-      cognitiveOrdered: 0,
+      complexity: 1,
+      campbell: 0,
+      mbcc: 0,
     });
     this.functionNodes.push({ name, node: stmt });
     if (body) {
@@ -585,49 +587,12 @@ class Analyzer {
     // Simple statement: expression, assignment, return, import, pass...
     this.visitSimpleStatement(stmt, route, inFunction);
   }
-
-  /** Branch points inside a function body, nested functions excluded. */
-  private complexityOf(node: Node | null): number {
-    if (!node) {
-      return 0;
-    }
-    let count = 0;
-    const visit = (n: Node): void => {
-      if (FUNCTION_TYPES.has(n.type) || n.type === 'class_definition') {
-        return;
-      }
-      switch (n.type) {
-        case 'if_statement':
-        case 'elif_clause':
-        case 'for_statement':
-        case 'while_statement':
-        case 'except_clause':
-        case 'except_group_clause':
-        case 'case_clause':
-        case 'boolean_operator':
-        case 'conditional_expression':
-        case 'for_in_clause':
-        case 'if_clause':
-          count += 1;
-          break;
-        default:
-          break;
-      }
-      for (const child of n.namedChildren) {
-        if (child) {
-          visit(child);
-        }
-      }
-    };
-    visit(node);
-    return count;
-  }
 }
 
 export function analyzePythonTree(path: string, tree: Tree, options: DepthOptions = DEFAULT_DEPTH_OPTIONS): FileStructure {
   const analyzer = new Analyzer(options);
   analyzer.analyzeModule(tree.rootNode);
-  analyzer.scoreCognitive();
+  analyzer.measure();
   return {
     path,
     depth: analyzer.depth,

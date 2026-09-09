@@ -31,7 +31,7 @@
  */
 import type { Node, Tree } from 'web-tree-sitter';
 import { DEFAULT_DEPTH_OPTIONS, DepthOptions, FileStructure, FunctionComplexity, RouteStep } from '../../engine/types';
-import { scoreTypeScriptFunctions, ScoredFunction } from './cognitive';
+import { MeasuredFunction, measureTypeScript } from '@projectrevivesolutions/complexity';
 
 const TERMINATORS = new Set(['return_statement', 'throw_statement', 'break_statement', 'continue_statement']);
 const FUNCTION_TYPES = new Set(['function_declaration', 'function_expression', 'arrow_function', 'method_definition', 'generator_function', 'generator_function_declaration', 'function']);
@@ -66,16 +66,20 @@ class Analyzer {
   readonly declarations = new Set<number>();
   readonly functions: FunctionComplexity[] = [];
   /** The node behind each entry of `functions`, same order, for the cognitive pass. */
-  private readonly functionNodes: ScoredFunction[] = [];
+  private readonly functionNodes: MeasuredFunction[] = [];
 
   constructor(private readonly options: DepthOptions) {}
 
-  /** Fills in the cognitive numbers once the whole file is known, because recursion cycles need every function. */
-  scoreCognitive(): void {
-    const scores = scoreTypeScriptFunctions(this.functionNodes);
-    scores.forEach((score, i) => {
-      this.functions[i].cognitive = score.cognitive;
-      this.functions[i].cognitiveOrdered = score.cognitiveOrdered;
+  /**
+   * Fills in all three numbers once the whole file is known (recursion
+   * cycles need every function). The measures come from
+   * @projectrevivesolutions/complexity, the one scorer every PRS tool uses.
+   */
+  measure(): void {
+    measureTypeScript(this.functionNodes).forEach((m, i) => {
+      this.functions[i].complexity = m.cyclomatic;
+      this.functions[i].campbell = m.campbell;
+      this.functions[i].mbcc = m.mbcc;
     });
   }
 
@@ -311,9 +315,9 @@ class Analyzer {
       name,
       startLine: this.line(fn),
       endLine: fn.endPosition.row + 1,
-      complexity: 1 + this.complexityOf(body),
-      cognitive: 0,
-      cognitiveOrdered: 0,
+      complexity: 1,
+      campbell: 0,
+      mbcc: 0,
     });
     this.functionNodes.push({ name, node: fn });
     if (!body) {
@@ -564,50 +568,12 @@ class Analyzer {
     }
     this.visitControlStatement(stmt, route, inFunction);
   }
-
-  private complexityOf(node: Node | null): number {
-    if (!node) {
-      return 0;
-    }
-    let count = 0;
-    const visit = (n: Node): void => {
-      if (FUNCTION_TYPES.has(n.type) || CLASS_TYPES.has(n.type)) {
-        return;
-      }
-      switch (n.type) {
-        case 'if_statement':
-        case 'for_statement':
-        case 'for_in_statement':
-        case 'while_statement':
-        case 'do_statement':
-        case 'catch_clause':
-        case 'switch_case':
-        case 'ternary_expression':
-          count += 1;
-          break;
-        case 'binary_expression':
-          if (SHORT_CIRCUIT.has(n.childForFieldName('operator')?.text ?? '')) {
-            count += 1;
-          }
-          break;
-        default:
-          break;
-      }
-      for (const child of n.namedChildren) {
-        if (child) {
-          visit(child);
-        }
-      }
-    };
-    visit(node);
-    return count;
-  }
 }
 
 export function analyzeTypeScriptTree(path: string, tree: Tree, options: DepthOptions = DEFAULT_DEPTH_OPTIONS): FileStructure {
   const analyzer = new Analyzer(options);
   analyzer.analyzeProgram(tree.rootNode);
-  analyzer.scoreCognitive();
+  analyzer.measure();
   return {
     path,
     depth: analyzer.depth,

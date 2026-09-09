@@ -39,7 +39,7 @@ function struct(path: string, depth: Record<number, number>, routes: Record<numb
     depth: new Map(Object.entries(depth).map(([k, v]) => [Number(k), v])),
     routes: new Map(Object.entries(routes).map(([k, v]) => [Number(k), v])),
     unreachable: new Set(unreachable),
-    functions: [{ name: 'f', startLine: 1, endLine: 20, complexity: 12, cognitive: 5, cognitiveOrdered: 8 }],
+    functions: [{ name: 'f', startLine: 1, endLine: 20, complexity: 12, campbell: 5, mbcc: 8 }],
     declarations: new Set([1]),
   };
 }
@@ -257,7 +257,7 @@ test('brief: names the line, the bar, the route, where tests stop, nearby tests,
 test('function brief: both modes quote the function, list the short lines, and end with the judge sentence', () => {
   const result = sampleResult();
   const file = result.files[0];
-  const fn = { name: 'f', startLine: 1, endLine: 8, complexity: 5, cognitive: 0, cognitiveOrdered: 0 };
+  const fn = { name: 'f', startLine: 1, endLine: 8, complexity: 5, campbell: 0, mbcc: 0 };
   const source = [1, 2, 3, 4, 5, 6, 7, 8].map((l) => ({ line: l, text: SRC[l] }));
   const testing = buildFunctionBrief({ path: 'a.py', fn, file, source, sourceTruncated: false, limit: 3, testsPath: 'tests', language: 'Python', mode: 'test' });
   assert.match(testing, /^# DeepTest: test every way through f\(\) in a\.py/);
@@ -278,7 +278,7 @@ test('function brief: both modes quote the function, list the short lines, and e
 });
 
 test('function decisions: pinned to the start line, judged by ways over the limit, kept apart from line decisions', () => {
-  const fn = { name: 'f', startLine: 1, endLine: 8, complexity: 5, cognitive: 0, cognitiveOrdered: 0 };
+  const fn = { name: 'f', startLine: 1, endLine: 8, complexity: 5, campbell: 0, mbcc: 0 };
   const d = { path: 'a.py', line: 1, lineHash: hashLine(SRC[1]), kind: 'fix' as const, reason: 'refactor', by: 'mike', at: '2026-09-06T10:00:00Z', gapAtDecision: 2, scope: 'function' as const, functionName: 'f' };
   assert.equal(functionDecisionState(undefined, fn, 3, SRC[1]).kind, 'none');
   assert.deepEqual(functionDecisionState(d, fn, 3, SRC[1]), { kind: 'fix-pending', decision: d, stillShortBy: 2, moved: false });

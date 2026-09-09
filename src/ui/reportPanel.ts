@@ -223,7 +223,7 @@ function html(m: ReportModel): string {
   ${m.compared.length ? `<h2>Ways through against tangle (${m.compared.length} of ${s.functions} functions)</h2><p>The functions with the most ways through, with all three numbers side by side. A high count of ways through and a low tangle is a flat list of choices, such as a switch: long, but not hard to follow. A high tangle with few ways through is deep nesting. Where the Campbell and MBCC numbers differ, the function has boolean conditions whose order carries meaning. A function's tangle includes everything nested inside it, callbacks included, each one level deeper, so a short function that registers many handlers can carry a large tangle.</p><table>
     <tr><th>Function</th><th>Where</th><th>Ways through</th><th>Tangle (Campbell)</th><th>Tangle (MBCC)</th></tr>
     ${m.compared
-      .map((fn) => `<tr><td><code>${esc(fn.name)}()</code></td><td><a href="#" class="act" data-act="open" data-path="${esc(fn.path)}" data-line="${fn.startLine}">${esc(fn.path)} line ${fn.startLine}</a></td><td>${fn.complexity}</td><td>${fn.cognitive}</td><td>${fn.cognitiveOrdered}</td></tr>`)
+      .map((fn) => `<tr><td><code>${esc(fn.name)}()</code></td><td><a href="#" class="act" data-act="open" data-path="${esc(fn.path)}" data-line="${fn.startLine}">${esc(fn.path)} line ${fn.startLine}</a></td><td>${fn.complexity}</td><td>${fn.campbell}</td><td>${fn.mbcc}</td></tr>`)
       .join('')}
   </table>` : ''}
 

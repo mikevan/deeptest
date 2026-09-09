@@ -168,14 +168,14 @@ export const MBCC_LONG = "MikeVan's Better Cognitive Complexity";
  * operand when the order of the operands carries meaning.
  */
 export function tangleSentence(fn: FunctionComplexity): string {
-  return fn.cognitive === fn.cognitiveOrdered
-    ? `Its tangle is ${fn.cognitive} by Campbell and by ${MBCC}.`
-    : `Its tangle is ${fn.cognitive} by Campbell and ${fn.cognitiveOrdered} by ${MBCC}.`;
+  return fn.campbell === fn.mbcc
+    ? `Its tangle is ${fn.campbell} by Campbell and by ${MBCC}.`
+    : `Its tangle is ${fn.campbell} by Campbell and ${fn.mbcc} by ${MBCC}.`;
 }
 
 /** The three numbers, compact, for a list row: "30 ways through, tangle 12 / 15". */
 export function threeNumbers(fn: FunctionComplexity): string {
-  const tangle = fn.cognitive === fn.cognitiveOrdered ? `${fn.cognitive}` : `${fn.cognitive} / ${fn.cognitiveOrdered}`;
+  const tangle = fn.campbell === fn.mbcc ? `${fn.campbell}` : `${fn.campbell} / ${fn.mbcc}`;
   return `${fn.complexity} ways through, tangle ${tangle}`;
 }
 
@@ -203,7 +203,7 @@ export function summaryRows(summary: Summary, voice: Voice): SummaryRow[] {
           ? 'No functions measured.'
           : `Every function is within your limit of ${t.maxFunctionComplexity} ways through.`,
       ok: summary.complexityOk,
-      numbers: `cyclomatic complexity total ${summary.totalComplexity}, average ${summary.averageComplexity.toFixed(1)}, max ${summary.maxComplexity}; cognitive complexity max ${summary.maxCognitive} (Campbell), ${summary.maxCognitiveOrdered} (${MBCC})`,
+      numbers: `cyclomatic complexity total ${summary.totalComplexity}, average ${summary.averageComplexity.toFixed(1)}, max ${summary.maxComplexity}; cognitive complexity max ${summary.maxCampbell} (Campbell), ${summary.maxMbcc} (${MBCC})`,
     },
   ];
   if (summary.unreachableLines > 0) {

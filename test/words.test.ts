@@ -85,7 +85,7 @@ test('verdict: not ready names the untested lines first; ready says what is left
 });
 
 test('summaryRows: plain values, numbers only when asked, hardest function named', () => {
-  const f = analyzeFile(cov('a.py', { 1: ['t'], 2: [], 3: ['t'] }), struct('a.py', { 1: 1, 2: 1, 3: 2 }, [{ name: 'big', startLine: 1, endLine: 9, complexity: 12, cognitive: 7, cognitiveOrdered: 9 }]));
+  const f = analyzeFile(cov('a.py', { 1: ['t'], 2: [], 3: ['t'] }), struct('a.py', { 1: 1, 2: 1, 3: 2 }, [{ name: 'big', startLine: 1, endLine: 9, complexity: 12, campbell: 7, mbcc: 9 }]));
   const s = summarize([f]);
   const rows = summaryRows(s, plain);
   assert.deepEqual(rows.map((r) => r.label), ['Tests reach', 'Lines with enough tests', 'Hardest to test']);
@@ -97,10 +97,10 @@ test('summaryRows: plain values, numbers only when asked, hardest function named
   const withNumbers = summaryRows(s, numbers);
   assert.match(withNumbers[2].numbers ?? '', /cyclomatic complexity total 12/);
   assert.match(withNumbers[2].numbers ?? '', /cognitive complexity max 7 \(Campbell\), 9 \(MBCC\)/);
-  assert.equal(tangleSentence({ name: 'f', startLine: 1, endLine: 2, complexity: 3, cognitive: 4, cognitiveOrdered: 4 }), 'Its tangle is 4 by Campbell and by MBCC.');
-  assert.equal(threeNumbers({ name: 'f', startLine: 1, endLine: 2, complexity: 3, cognitive: 4, cognitiveOrdered: 4 }), '3 ways through, tangle 4');
-  assert.equal(threeNumbers({ name: 'f', startLine: 1, endLine: 2, complexity: 3, cognitive: 4, cognitiveOrdered: 6 }), '3 ways through, tangle 4 / 6');
-  const fine = summarize([analyzeFile(cov('a.py', { 1: ['t'] }), struct('a.py', { 1: 1 }, [{ name: 'f', startLine: 1, endLine: 2, complexity: 2, cognitive: 0, cognitiveOrdered: 0 }]))]);
+  assert.equal(tangleSentence({ name: 'f', startLine: 1, endLine: 2, complexity: 3, campbell: 4, mbcc: 4 }), 'Its tangle is 4 by Campbell and by MBCC.');
+  assert.equal(threeNumbers({ name: 'f', startLine: 1, endLine: 2, complexity: 3, campbell: 4, mbcc: 4 }), '3 ways through, tangle 4');
+  assert.equal(threeNumbers({ name: 'f', startLine: 1, endLine: 2, complexity: 3, campbell: 4, mbcc: 6 }), '3 ways through, tangle 4 / 6');
+  const fine = summarize([analyzeFile(cov('a.py', { 1: ['t'] }), struct('a.py', { 1: 1 }, [{ name: 'f', startLine: 1, endLine: 2, complexity: 2, campbell: 0, mbcc: 0 }]))]);
   assert.equal(summaryRows(fine, plain)[2].value, 'Every function is within your limit of 10 ways through.');
   assert.equal(summaryRows(summarize([]), plain)[2].value, 'No functions measured.');
 });

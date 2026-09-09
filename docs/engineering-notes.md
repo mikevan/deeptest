@@ -475,3 +475,30 @@ figure keeps her name for the same reason: a reader can look either one
 up. Nothing in the arithmetic changed; field names (`cognitive`,
 `cognitiveOrdered`) stay, since the scorer is about to move into a shared
 package and the rename of code identifiers belongs there.
+
+## One scorer for every tool (0.4.0)
+
+The complexity arithmetic left this tree. `@projectrevivesolutions/complexity`
+(C:\workspace\complexity, repo mikevan/complexity) now holds the counter,
+the Python and TypeScript walkers, McCabe's fork count, the function
+finders, the 27 whitepaper tests, and docs/measures.md with every rule and
+every reading chosen. DeepTest depends on it (`file:../complexity` until the
+repo is on GitHub, then `github:mikevan/complexity#<commit>`), and
+RefactorIt will depend on the same package, so the two tools cannot
+disagree about the same function. The package holds no grammars and starts
+no parser: DeepTest still walks the tree for routes and depth and hands
+the function nodes over; the package hands back
+`{ cyclomatic, campbell, mbcc }`.
+
+Field names in DeepTest followed the package: `cognitive` is `campbell`,
+`cognitiveOrdered` is `mbcc`. `complexity` (cyclomatic) kept its name
+because decisions.json and the API shape carry it. Checked that the
+numbers are identical to 0.3.7 on DeepTest's own source (renderMarkdown
+20 / 56 / 59, onSidebarMessage 28 / 22 / 22, activate 2 / 113 / 120,
+terminates 21 / 29 / 39) before the copies were deleted.
+
+Build order matters once: the package must be built before DeepTest
+compiles (`npm install` in C:\workspace\complexity runs its `prepare`
+script, which is the build). `npm install` in DeepTest then symlinks it
+and esbuild bundles it into dist/extension.js like any other dependency;
+the VSIX carries no reference to the folder.

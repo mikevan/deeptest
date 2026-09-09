@@ -2,7 +2,7 @@
 
 Updated 2026-09-09. Companion to vscode-density-extension-spec.md.
 
-## What exists (v0.3.9)
+## What exists (v0.4.0)
 
 - One language contract (src/languages/types.ts) and a registry. Nothing
   above the contract names a language. Proven by grep and by the integration
@@ -26,17 +26,19 @@ Updated 2026-09-09. Companion to vscode-density-extension-spec.md.
   by MikeVan's Better Cognitive Complexity (MBCC), the ordered-operand rule. Shown beside each other on the "Hardest to
   test" row, on every over-limit function, and in the report's "Ways
   through against tangle" table. See the engineering notes.
-- 205 unit tests under Vitest; 2 integration suites; the extension measures
+- 178 unit tests under Vitest here (the 27 complexity tests moved to the package); 2 integration suites; the extension measures
   itself.
 
 ## Run it (PowerShell)
 
 ```powershell
+cd C:\workspace\complexity
+npm install                                     # builds the shared scorer
 cd C:\workspace\DeepTest
 npm install
-npm test                                        # 205 tests
+npm test                                        # 178 tests
 npm run build                                   # dist/extension.js, wasm grammars, runner hooks
-npx @vscode/vsce package --no-dependencies      # deeptest-0.3.9.vsix
+npx @vscode/vsce package --no-dependencies      # deeptest-0.4.0.vsix
 ```
 
 Then, in VS Code: Extensions view (Ctrl+Shift+X), the "..." button at the

@@ -127,7 +127,7 @@ export function buildFunctionBrief(input: FunctionBriefInput): string {
   lines.push('## The function');
   lines.push('');
   lines.push(`\`${fn.name}()\`, ${path} lines ${fn.startLine} to ${fn.endLine}. It has ${fn.complexity} ways through it (cyclomatic complexity ${fn.complexity}); the limit for this project is ${limit}.`);
-  lines.push(`Its Cognitive Complexity is ${fn.cognitive} (Campbell, SonarSource 2018)${fn.cognitive === fn.cognitiveOrdered ? '' : ` and ${fn.cognitiveOrdered} by MikeVan's Better Cognitive Complexity (MBCC), which charges a chain of and/or one per operand when the order of the operands carries meaning`}. Cyclomatic counts forks; cognitive complexity counts how hard the function is to follow, charging nesting more the deeper it goes.`);
+  lines.push(`Its Cognitive Complexity is ${fn.campbell} (Campbell, SonarSource 2018)${fn.campbell === fn.mbcc ? '' : ` and ${fn.mbcc} by MikeVan's Better Cognitive Complexity (MBCC), which charges a chain of and/or one per operand when the order of the operands carries meaning`}. Cyclomatic counts forks; cognitive complexity counts how hard the function is to follow, charging nesting more the deeper it goes.`);
   lines.push('');
   lines.push('```');
   for (const c of source) {
