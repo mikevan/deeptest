@@ -351,3 +351,115 @@ will be `prs.refactorit`. KeepSafe stays `KeepSafe.keepsafe`: it is already
 live under that publisher, the Marketplace cannot move a listing between
 publishers, and a republish would start its install count and reviews from
 zero. Its id lives in one place, src/keepsafe.ts.
+
+## Cognitive complexity beside cyclomatic (0.3.7)
+
+Why: cyclomatic counts forks, so a flat message switch with 28 cases sits
+at the top of the "harder to test" list although nobody finds it hard to
+follow, while a method with three nested loops and a guard chain scores
+lower. Michael wants to compare cyclomatic, Campbell's cognitive
+complexity (SonarSource, 2018, https://www.sonarsource.com/docs/CognitiveComplexity.pdf),
+and his own ordered-operand variant on real projects before choosing which
+number, if any, should drive the verdict. So this build measures all three
+and changes no verdict: "Hardest to test" and the over-limit list are
+still ways through, with the tangle shown beside them, and the full report
+gains a "Ways through against tangle" table of the 30 functions with the
+most ways through.
+
+Shape: the arithmetic is one class (src/languages/shared/cognitive.ts,
+`CognitiveCounter`) and each language has a walker that only says what
+each node is (src/languages/python/cognitive.ts,
+src/languages/typescript/cognitive.ts). Nothing above the language contract
+changed except two new numbers on `FunctionComplexity`. Scores are filled
+in after the whole file is walked because recursion cycles need every
+function's call list first.
+
+Rules as implemented, and the readings that had to be chosen:
+
+- Structural (+1 plus nesting): if, ternary, switch/match (once, however
+  many cases), for, while, do, catch/except. Hybrid (+1, no nesting
+  charge, body one deeper): elif/else if, else, and a Python loop `else`.
+  Fundamental (+1 flat): each run of the same boolean operator, each
+  function on a recursion cycle, break LABEL / continue LABEL. Nothing:
+  try, finally, with, `??`, `?.`, plain break and continue.
+- Boolean runs are found by flattening the left-deep tree into source
+  order and cutting it where the operator changes. `a and b and c or d or
+  e and f` is three runs, as in the whitepaper. Parentheses and `not`
+  start a fresh sequence.
+- Ordered-operand rule (the second number): a run costs one per operand
+  when any operand contains a call, `await`, a walrus, an assignment,
+  `new`, `yield`, or `++`/`--`, or when a later operand does member or
+  subscript access rooted at a name an earlier operand mentioned. `member
+  is not None and member.dues is not None and member.dues.paid > cutoff`
+  costs 3; `a > 0 and b > 0 and c > 0` costs 1. An operand at a run
+  boundary belongs to both runs. This is the only place the two numbers
+  differ, so their difference is the cost of ordered boolean logic.
+- Nesting: everything inside a function counts toward it, nested
+  functions and lambdas included, one level deeper each and with no
+  increment of their own. That is the whitepaper's rule and it has a
+  visible consequence: `activate()` in src/extension.ts has 2 ways
+  through and a tangle of 113, because it registers twenty commands with
+  inline callbacks. The nested functions are also rows of their own, so
+  their complexity appears twice in the table, once on its own and once
+  inside the parent. SonarJS makes one exception (a top-level function
+  with no structural complexity of its own reports its nested functions
+  separately, to cope with module wrappers and test suites); not adopted
+  here, so the numbers stay the whitepaper's. Candidate for a later
+  decision.
+- Comprehensions cost nothing. The whitepaper predates a ruling and the
+  reading taken is that a comprehension is one expression, not a loop the
+  reader steps through. Cyclomatic still counts each clause. UNVERIFIED
+  against SonarPython's implementation.
+- Recursion is by name within one file: `f()`, `self.f()`, `cls.f()`,
+  `this.f()`. Two methods with the same name in different classes of one
+  file share a node in the call graph, which can produce a false cycle;
+  cross-file recursion is invisible. Both are accepted for now and both
+  are the reason the recursion increment is a single flat +1.
+- Ternary is structural, not hybrid; one summary of the whitepaper reads
+  otherwise but Appendix B lists it with the structural increments.
+
+Checked against the whitepaper's worked cases in test/cognitive.test.ts
+(27 tests, both languages), and against DeepTest's own source: the three
+flat switch-style dispatchers (onSidebarMessage 28 ways / tangle 22,
+onReportMessage 23 / 22) drop below the deeply nested renderers
+(renderMarkdown 20 / 56, results 28 / 45), which is the ordering the
+measure was adopted to produce.
+
+## The run that never happened (0.3.8)
+
+First real project, Regalia: every check said "0 tests passed", 6%
+coverage, 5402 lines never tested, and a refactor went ahead on those
+numbers. The log had the cause in plain sight. Regalia's pytest.ini sets
+`addopts = --cov=. --cov-report=... --cov-fail-under=5`. DeepTest runs
+pytest with `-p no:cov` so that coverage.py is the only thing measuring;
+with pytest-cov switched off, pytest no longer knows the `--cov` options,
+prints a usage error, and exits 4 before collecting a test. coverage.py
+still wrote a data file (import-time execution), so DeepTest scored it.
+
+Two fixes, both in src/languages/python/coverage.ts:
+
+1. `readProjectAddopts` reads `addopts` from pytest.ini, .pytest.ini,
+   pyproject.toml (`[tool.pytest.ini_options]`, string or array), tox.ini,
+   or setup.cfg, in pytest's own order. `withoutCoverageOptions` drops
+   every `--cov*` and `--no-cov*` token, plus the value token of the ones
+   that take a separate value (`--cov src`, `--cov-report html`). What is
+   left goes back on the command line as `-o addopts=<rest>`, which
+   overrides the ini value for this run only. The project's file is never
+   touched, and the log says exactly which options were left out. When
+   addopts has no pytest-cov options nothing is added, so every other
+   project runs exactly as before.
+2. `pytestFailureBeforeTests` turns pytest's exit codes 4 (usage), 3
+   (internal), 5 (no tests collected), and 2 without any test having
+   passed (collection error) into a thrown error carrying pytest's last
+   lines, so the panel shows "The test run failed before any test ran,
+   because pytest did not accept its command line. pytest said: ..." and
+   no numbers. Exit 2 after tests did run (Ctrl-C) is left alone.
+
+Verified against real pytest 9.1.1 with no pytest-cov installed:
+test/python-adapter.test.ts copies the fixture into a temp folder with
+Regalia's exact addopts line and gets 3 passed; a second copy with a
+bogus option gets the failure sentence, not a result.
+
+Lesson recorded for the tool itself: a measurement of test rigour must
+refuse to produce a number from a run in which no test ran. The old
+behaviour was worse than no tool, because 6% looked like a fact.

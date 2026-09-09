@@ -1,8 +1,8 @@
 # DeepTest: build status and run instructions
 
-Updated 2026-09-05, round three. Companion to vscode-density-extension-spec.md.
+Updated 2026-09-09. Companion to vscode-density-extension-spec.md.
 
-## What exists (v0.3.6)
+## What exists (v0.3.8)
 
 - One language contract (src/languages/types.ts) and a registry. Nothing
   above the contract names a language. Proven by grep and by the integration
@@ -21,7 +21,12 @@ Updated 2026-09-05, round three. Companion to vscode-density-extension-spec.md.
 - Decisions: Fix this (brief to editor chat + clipboard), Accept with reason
   (.deeptest/decisions.json, pinned to the line's text), Leave. The tool
   never acts on a shortfall by itself and never accepts a fix.
-- 99 unit tests under Vitest; 2 integration suites; the extension measures
+- Three numbers per function: ways through (cyclomatic, drives the
+  verdict), tangle by the published cognitive complexity rule, and tangle
+  by the ordered-operand rule. Shown beside each other on the "Hardest to
+  test" row, on every over-limit function, and in the report's "Ways
+  through against tangle" table. See the engineering notes.
+- 205 unit tests under Vitest; 2 integration suites; the extension measures
   itself.
 
 ## Run it (PowerShell)
@@ -29,15 +34,19 @@ Updated 2026-09-05, round three. Companion to vscode-density-extension-spec.md.
 ```powershell
 cd C:\workspace\DeepTest
 npm install
-npm test                                        # 109 tests
+npm test                                        # 205 tests
 npm run build                                   # dist/extension.js, wasm grammars, runner hooks
-npx @vscode/vsce package --no-dependencies      # deeptest-0.3.6.vsix
+npx @vscode/vsce package --no-dependencies      # deeptest-0.3.8.vsix
 ```
 
 Then, in VS Code: Extensions view (Ctrl+Shift+X), the "..." button at the
 top right, "Install from VSIX...", pick the file, "Install", then "Restart
 Extensions" in the notification. The DeepTest icon is in the activity bar.
 Repeat after every source change.
+
+- pytest runs honour the project's own `addopts` minus its pytest-cov
+  options (0.3.8), and a pytest that fails before collecting is reported
+  as a failed run with pytest's words, never as "0 passed" with numbers.
 
 ## Known problem
 

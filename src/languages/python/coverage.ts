@@ -58,6 +58,143 @@ export function splitArgs(text: string): string[] {
   return text.trim() ? text.trim().split(/\s+/) : [];
 }
 
+/**
+ * The project's own `addopts`, from whichever config file pytest would read
+ * (in pytest's own order of precedence), or undefined when there is none.
+ *
+ * Why this exists: DeepTest runs pytest with `-p no:cov`, so its own
+ * coverage.py run is the only one measuring. A project whose addopts turn
+ * pytest-cov on (`--cov=. --cov-report=...`) then hands pytest options that
+ * no loaded plugin understands, and pytest exits with a usage error before
+ * collecting a single test. Regalia did exactly that: every check reported
+ * "0 passed" and a coverage figure made of import-time execution. The fix is
+ * to read the project's addopts, drop only the pytest-cov options, and hand
+ * the rest back with `-o addopts=...`, which overrides the ini value for
+ * this one run and leaves the project's file untouched.
+ */
+export function readProjectAddopts(workspaceRoot: string): string | undefined {
+  const ini = (file: string, section: string): string | undefined => {
+    const full = path.join(workspaceRoot, file);
+    if (!fs.existsSync(full)) {
+      return undefined;
+    }
+    const lines = fs.readFileSync(full, 'utf8').split(/\r?\n/);
+    let inSection = false;
+    let value: string | undefined;
+    for (const raw of lines) {
+      const line = raw.replace(/\s+$/, '');
+      const header = /^\[([^\]]+)\]\s*$/.exec(line);
+      if (header) {
+        if (value !== undefined) {
+          break;
+        }
+        inSection = header[1].trim() === section;
+        continue;
+      }
+      if (!inSection) {
+        continue;
+      }
+      if (value !== undefined) {
+        // ini continuation lines are indented.
+        if (/^\s/.test(raw) && line.trim()) {
+          value += ` ${line.trim()}`;
+          continue;
+        }
+        break;
+      }
+      const m = /^addopts\s*[=:]\s*(.*)$/.exec(line);
+      if (m) {
+        value = m[1].trim();
+      }
+    }
+    return value;
+  };
+  const toml = (): string | undefined => {
+    const full = path.join(workspaceRoot, 'pyproject.toml');
+    if (!fs.existsSync(full)) {
+      return undefined;
+    }
+    const text = fs.readFileSync(full, 'utf8');
+    const section = /\[tool\.pytest\.ini_options\]([\s\S]*?)(?=\n\[|$)/.exec(text);
+    if (!section) {
+      return undefined;
+    }
+    const body = section[1];
+    const str = /^\s*addopts\s*=\s*"((?:[^"\\]|\\.)*)"/m.exec(body) ?? /^\s*addopts\s*=\s*'([^']*)'/m.exec(body);
+    if (str) {
+      return str[1];
+    }
+    const arr = /^\s*addopts\s*=\s*\[([\s\S]*?)\]/m.exec(body);
+    if (arr) {
+      return Array.from(arr[1].matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'/g))
+        .map((m) => m[1] ?? m[2])
+        .join(' ');
+    }
+    return undefined;
+  };
+  // pytest's order: pytest.ini, then pyproject.toml, then tox.ini, then setup.cfg.
+  return ini('pytest.ini', 'pytest') ?? ini('.pytest.ini', 'pytest') ?? toml() ?? ini('tox.ini', 'pytest') ?? ini('setup.cfg', 'tool:pytest');
+}
+
+/** pytest-cov options that take a value in a separate token when written without `=`. */
+const COV_WITH_VALUE = new Set(['--cov', '--cov-report', '--cov-config', '--cov-fail-under', '--cov-context']);
+
+/**
+ * The same arguments with every pytest-cov option removed. Returns the kept
+ * arguments and the dropped ones, so the log can say what was left out.
+ */
+export function withoutCoverageOptions(addopts: string): { kept: string[]; dropped: string[] } {
+  const kept: string[] = [];
+  const dropped: string[] = [];
+  const args = splitArgs(addopts);
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--no-cov' || arg === '--no-cov-on-fail' || arg.startsWith('--cov')) {
+      dropped.push(arg);
+      // `--cov src` and `--cov-report html` carry the value in the next token.
+      if (COV_WITH_VALUE.has(arg) && i + 1 < args.length && !args[i + 1].startsWith('-')) {
+        dropped.push(args[i + 1]);
+        i += 1;
+      }
+      continue;
+    }
+    kept.push(arg);
+  }
+  return { kept, dropped };
+}
+
+/**
+ * When pytest stopped before any test ran, the sentence to show instead of
+ * numbers; otherwise undefined. pytest's exit codes: 2 interrupted (this
+ * includes collection errors), 3 internal error, 4 usage error, 5 no tests
+ * collected. A run like that must never be scored: "0 passed" beside a
+ * coverage percentage reads like a result, and it is not one.
+ */
+export function pytestFailureBeforeTests(output: string, exitCode: number | null, target: string): string | undefined {
+  const tail = output
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !/^={3,}/.test(l))
+    .slice(-8)
+    .join(' ');
+  const said = tail ? ` pytest said: ${tail}` : '';
+  switch (exitCode) {
+    case 4:
+      return `The test run failed before any test ran, because pytest did not accept its command line.${said} Press "Show the log" to see the whole run.`;
+    case 3:
+      return `The test run failed before any test ran, because pytest hit an internal error.${said} Press "Show the log" to see the whole run.`;
+    case 5:
+      return `pytest found no tests under "${target}". Press "Change the setup" and check the tests folder.`;
+    case 2:
+      if (/\b0 passed\b|no tests ran|error(s)? during collection|Interrupted/i.test(output) && !/\b[1-9]\d* passed\b/.test(output)) {
+        return `The test run stopped before any test ran, usually because a test file failed to import.${said} Press "Show the log" to see the whole run.`;
+      }
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
 const IGNORED_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'env', '.env', 'site-packages', '.tox', '.mypy_cache', '.pytest_cache', '.deeptest', 'build', 'dist', '.eggs']);
 const TEST_FILE = /^(test_.*\.py|.*_test\.py|tests?\.py)$/;
 
@@ -283,11 +420,24 @@ export class PythonCoverageSource implements CoverageSource {
     const runArgs = [
       '-m', 'coverage', 'run', `--rcfile=${rcFile}`,
       '-m', 'pytest', target, '-q', '-p', 'no:cacheprovider', '-p', 'no:cov',
-      ...splitArgs(pytestArgs),
     ];
+    const projectAddopts = readProjectAddopts(ctx.workspaceRoot);
+    if (projectAddopts !== undefined) {
+      const { kept, dropped } = withoutCoverageOptions(projectAddopts);
+      if (dropped.length > 0) {
+        ctx.log(`The project's pytest addopts turn on pytest-cov (${dropped.join(' ')}). DeepTest measures coverage itself, so it ran pytest without those options and kept the rest${kept.length ? ` (${kept.join(' ')})` : ''}.`);
+        runArgs.push('-o', `addopts=${kept.join(' ')}`);
+      }
+    }
+    runArgs.push(...splitArgs(pytestArgs));
     ctx.log(`$ ${interpreter} ${runArgs.join(' ')}`);
     const run = await runProcess(interpreter, runArgs, { cwd: ctx.workspaceRoot, log: ctx.log, signal: ctx.signal });
     const tests = parsePytestSummary(run.output, run.exitCode);
+
+    const failure = pytestFailureBeforeTests(run.output, run.exitCode, target);
+    if (failure) {
+      throw new Error(failure);
+    }
 
     if (!fs.existsSync(dataFile)) {
       throw new Error(`coverage.py produced no data, and the test run ended with exit code ${run.exitCode}. Press "Show the log" to see the test run.`);

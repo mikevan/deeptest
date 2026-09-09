@@ -223,3 +223,86 @@ test.skipIf(!hasPython)('end to end on the fixture: coverage.py contexts through
 
   fs.rmSync(path.join(FIXTURE, '.deeptest'), { recursive: true, force: true });
 });
+
+// ---- addopts and pytest failures (0.3.8) --------------------------------
+
+import { pytestFailureBeforeTests, readProjectAddopts, withoutCoverageOptions } from '../src/languages/python/coverage';
+
+function tempProject(files: Record<string, string>): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deeptest-addopts-'));
+  for (const [name, content] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+    fs.writeFileSync(path.join(dir, name), content, 'utf8');
+  }
+  return dir;
+}
+
+test('readProjectAddopts: pytest.ini wins, continuation lines join, other files follow pytest order', () => {
+  const both = tempProject({
+    'pytest.ini': '[pytest]\ntestpaths = tests\naddopts = --cov=. --cov-report=html:htmlcov\n    --cov-fail-under=5 -ra\n\n[other]\naddopts = nope\n',
+    'setup.cfg': '[tool:pytest]\naddopts = --from-setup-cfg\n',
+  });
+  assert.equal(readProjectAddopts(both), '--cov=. --cov-report=html:htmlcov --cov-fail-under=5 -ra');
+  const cfgOnly = tempProject({ 'setup.cfg': '[tool:pytest]\naddopts = --from-setup-cfg\n' });
+  assert.equal(readProjectAddopts(cfgOnly), '--from-setup-cfg');
+  const toxOnly = tempProject({ 'tox.ini': '[tox]\nenvlist = py\n[pytest]\naddopts: -x\n' });
+  assert.equal(readProjectAddopts(toxOnly), '-x');
+  const tomlString = tempProject({ 'pyproject.toml': '[tool.black]\nline-length = 100\n\n[tool.pytest.ini_options]\naddopts = "--cov=src -q"\n\n[tool.other]\n' });
+  assert.equal(readProjectAddopts(tomlString), '--cov=src -q');
+  const tomlArray = tempProject({ 'pyproject.toml': '[tool.pytest.ini_options]\naddopts = [\n  "--cov=src",\n  "-ra",\n]\n' });
+  assert.equal(readProjectAddopts(tomlArray), '--cov=src -ra');
+  assert.equal(readProjectAddopts(tempProject({ 'pytest.ini': '[pytest]\ntestpaths = tests\n' })), undefined);
+  assert.equal(readProjectAddopts(tempProject({})), undefined);
+});
+
+test('withoutCoverageOptions drops every pytest-cov option, with its value, and keeps the rest', () => {
+  assert.deepEqual(withoutCoverageOptions('--cov=. --cov-report=html:htmlcov --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=5'), {
+    kept: [],
+    dropped: ['--cov=.', '--cov-report=html:htmlcov', '--cov-report=term-missing', '--cov-report=xml:coverage.xml', '--cov-fail-under=5'],
+  });
+  assert.deepEqual(withoutCoverageOptions('-ra --cov src --cov-report html -x --no-cov --cov-branch --tb=short'), {
+    kept: ['-ra', '-x', '--tb=short'],
+    dropped: ['--cov', 'src', '--cov-report', 'html', '--no-cov', '--cov-branch'],
+  });
+  // A bare --cov followed by another option keeps that option.
+  assert.deepEqual(withoutCoverageOptions('--cov -q'), { kept: ['-q'], dropped: ['--cov'] });
+  assert.deepEqual(withoutCoverageOptions('-ra -x'), { kept: ['-ra', '-x'], dropped: [] });
+  assert.deepEqual(withoutCoverageOptions(''), { kept: [], dropped: [] });
+});
+
+test('pytestFailureBeforeTests names the failure for exit codes 2 to 5 and stays silent for a real run', () => {
+  const usage = 'ERROR: usage: __main__.py [options] [file_or_dir]\n__main__.py: error: unrecognized arguments: --cov=.\n  inifile: pytest.ini\n';
+  assert.match(pytestFailureBeforeTests(usage, 4, 'tests') ?? '', /^The test run failed before any test ran, because pytest did not accept its command line\. pytest said: ERROR: usage/);
+  assert.match(pytestFailureBeforeTests(usage, 4, 'tests') ?? '', /Press "Show the log" to see the whole run\.$/);
+  assert.match(pytestFailureBeforeTests('', 3, 'tests') ?? '', /internal error/);
+  assert.equal(pytestFailureBeforeTests('no tests ran in 0.01s', 5, 'tests'), 'pytest found no tests under "tests". Press "Change the setup" and check the tests folder.');
+  assert.match(pytestFailureBeforeTests('ERROR tests/test_a.py - ImportError: x\n!!! Interrupted: 1 error during collection !!!\n1 error in 0.2s', 2, 'tests') ?? '', /a test file failed to import/);
+  assert.equal(pytestFailureBeforeTests('3 passed in 0.1s', 0, 'tests'), undefined);
+  assert.equal(pytestFailureBeforeTests('2 passed, 1 failed in 0.1s', 1, 'tests'), undefined);
+  // Ctrl-C after some tests ran is exit 2 too; that is not "before any test ran".
+  assert.equal(pytestFailureBeforeTests('3 passed in 0.1s\n!!! KeyboardInterrupt !!!', 2, 'tests'), undefined);
+});
+
+test.skipIf(!hasPython)('end to end: a project whose addopts turn on pytest-cov still runs its tests', async () => {
+  // Regalia's exact addopts line. With pytest-cov disabled these options made pytest exit 4 before collecting.
+  const dir = tempProject({ 'pytest.ini': '[pytest]\naddopts = --cov=. --cov-report=html:htmlcov --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=5\n' });
+  fs.cpSync(path.join(FIXTURE, 'src'), path.join(dir, 'src'), { recursive: true });
+  fs.cpSync(path.join(FIXTURE, 'tests'), path.join(dir, 'tests'), { recursive: true });
+  const source = pythonPlugin.createCoverageSource();
+  const log: string[] = [];
+  const run = await source.run({ workspaceRoot: dir, settings: settings('tests', 'src'), log: (l) => log.push(l) });
+  assert.equal(run.tests.passed, 3, log.join('\n'));
+  assert.ok(log.some((l) => l.startsWith("The project's pytest addopts turn on pytest-cov (--cov=. ")), log.join('\n'));
+  assert.ok(log.some((l) => l.includes('-o addopts=')), log.join('\n'));
+});
+
+test.skipIf(!hasPython)('end to end: a pytest usage error is reported as a failed run, never as 0 passed', async () => {
+  const dir = tempProject({ 'pytest.ini': '[pytest]\naddopts = --definitely-not-an-option\n' });
+  fs.cpSync(path.join(FIXTURE, 'src'), path.join(dir, 'src'), { recursive: true });
+  fs.cpSync(path.join(FIXTURE, 'tests'), path.join(dir, 'tests'), { recursive: true });
+  const source = pythonPlugin.createCoverageSource();
+  await assert.rejects(
+    source.run({ workspaceRoot: dir, settings: settings('tests', 'src'), log: () => undefined }),
+    (err: Error) => /failed before any test ran, because pytest did not accept its command line/.test(err.message) && /--definitely-not-an-option/.test(err.message),
+  );
+});
