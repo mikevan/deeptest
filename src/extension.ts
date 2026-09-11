@@ -11,6 +11,7 @@ import { runAnalysis } from './runner';
 import { ResultState } from './state';
 import { ReportMessage, ReportPanel } from './ui/reportPanel';
 import { keepSafeInstalled } from './keepsafe';
+import { untangleItInstalled } from './untangleit';
 import { ConfigDefaults, ConfigPanel } from './ui/configPanel';
 import { OverlayManager } from './ui/decorations';
 import { absoluteUri, workspaceRootOf } from './ui/paths';
@@ -73,7 +74,7 @@ async function detectDefaults(folder: vscode.WorkspaceFolder, config: DeepTestCo
   const plugin = pluginById(id);
   const detection = plugin ? await plugin.detect(workspaceRootOf(folder), host) : undefined;
   const detailedRoutes = vscode.workspace.getConfiguration('deeptest', folder).get<number>('report.detailedRoutes', 5);
-  return { detected, languageId: id, detection, detailedRoutes, keepSafeInstalled: keepSafeInstalled() };
+  return { detected, languageId: id, detection, detailedRoutes, keepSafeInstalled: keepSafeInstalled(), untangleItInstalled: untangleItInstalled() };
 }
 
 /** Exposed for integration tests and for other extensions that want the numbers. */

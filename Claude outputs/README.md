@@ -48,7 +48,7 @@ Before DeepTest hands a fix to your AI assistant, it offers a KeepSafe checkpoin
 
 **Fix this**: The one place DeepTest hands work to an AI, so it asks first. A KeepSafe checkpoint is offered, then a confirmation that names the line and says what will happen. The brief carries the line, its bar, the route, where tests stop, and nearby tests to copy in style. It goes to the editor's chat and to the clipboard.
 
-**Fix this on a function**: Two honest answers to a function with too many ways through it: break it into smaller pieces without changing what it does, or leave it and test every way through. You choose. When RefactorIt is installed, "Break it into smaller pieces" hands the job to it.
+**Fix this on a function**: Two honest answers to a function with too many ways through it: break it into smaller pieces without changing what it does, or leave it and test every way through. You choose. When UntangleIt is installed, "Break it into smaller pieces" hands the job to it.
 
 **Accept as it is**: Records why a line may stay below its bar, with your name and the date, in `.deeptest/decisions.json` beside the code. Pinned to the text of the line; change the line and the decision says it no longer applies.
 
@@ -95,7 +95,7 @@ Depth restarts at 0 inside every function. Module-level statements, `def`, `clas
 
 "Worst" is the gap: bar minus tests, largest first, then the deeper bar. That one definition drives the panel, the status bar, and the report.
 
-The three complexity numbers come from the shared library `@projectrevivesolutions/complexity`, the same one RefactorIt measures with, so the two tools never disagree about a function. The rules are in that package's `docs/measures.md`.
+The three complexity numbers come from the shared library `@projectrevivesolutions/complexity`, the same one UntangleIt measures with, so the two tools never disagree about a function. The rules are in that package's `docs/measures.md`.
 
 ---
 

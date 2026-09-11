@@ -1,6 +1,8 @@
 # MikeVan's AI Development Toolkit: common design and architecture language
 
-Draft 2, 2026-09-09 (draft 1 was 2026-09-06). Publisher: `prs` (Project Revive Solutions, LLC). The toolkit is MikeVan's AI Development Toolkit; the company publishes it. The words and the shape every tool in the toolkit shares, so that KeepSafe, DeepTest, RefactorIt, and whatever comes next read as one product family, integrate without knowing each other's insides, and can be reviewed against one standard. Where a tool departs from this document, the departure is written down in that tool's engineering notes with the reason.
+Draft 3, 2026-09-11 (draft 2 was 2026-09-09, draft 1 was 2026-09-06). Publisher: `prs` (Project Revive Solutions, LLC). The toolkit is MikeVan's AI Development Toolkit; the company publishes it. The words and the shape every tool in the toolkit shares, so that KeepSafe, DeepTest, UntangleIt, and whatever comes next read as one product family, integrate without knowing each other's insides, and can be reviewed against one standard. Where a tool departs from this document, the departure is written down in that tool's engineering notes with the reason.
+
+Draft 3 change: the untangling tool is named UntangleIt (2026-09-11). The Marketplace refused its first display name as too similar to an existing listing, and the tool was unpublished, so the name, id, commands, and storage folder all changed at once. See toolkit-api.md for the identifiers.
 
 ## 1. The thesis
 
@@ -14,7 +16,7 @@ Jeff: an accountant in his mid-40s with a CPA, never wrote code beyond Excel mac
 
 Use these words, in this sense, in every tool's interface, documentation, and code.
 
-- **Verb**: the one thing a tool does. KeepSafe remembers and restores. DeepTest measures and judges. RefactorIt untangles. A tool with two verbs is two tools.
+- **Verb**: the one thing a tool does. KeepSafe remembers and restores. DeepTest measures and judges. UntangleIt untangles. A tool with two verbs is two tools.
 - **Check**: a run of a tool over the workspace that ends in a verdict. "Check my code" is the button.
 - **Verdict**: the tool's one-sentence answer, first on the screen, always a complete sentence. "This looks ready." "This is not ready: 947 lines were never tested."
 - **Limit**: a threshold the person sets. "Your limit is 10." Never "threshold" on screen.
@@ -35,7 +37,7 @@ Use these words, in this sense, in every tool's interface, documentation, and co
 
 Michael's scale, applied to every part of every tool: **method call**, **atom**, **AI-based agent**, **skill**. An atom must leverage AI; that is the qualifying test. Prefer the AI-driven option where it fits; use a method call where a proof or a measurement is available and an AI adds nothing. Each tool's engineering notes list its components on this scale.
 
-Applied so far: DeepTest's engine, parsers, and coverage adapters are method calls (measurement, provable). Its Fix hand-off is an AI-based agent seam: the tool builds the brief, the person's assistant is the agent, the tool judges. KeepSafe is method calls throughout. RefactorIt's mechanical engine is method calls; its AI engine is an agent behind the same interface.
+Applied so far: DeepTest's engine, parsers, and coverage adapters are method calls (measurement, provable). Its Fix hand-off is an AI-based agent seam: the tool builds the brief, the person's assistant is the agent, the tool judges. KeepSafe is method calls throughout. UntangleIt's mechanical engine is method calls; its AI engine is an agent behind the same interface.
 
 ## 5. Principles
 
@@ -65,6 +67,7 @@ Every tool is a VS Code extension with these layers, in these folders, so a read
 - `hooks/`, `vendor/`: runner hooks and vendored grammars, copied to `dist/` by the build.
 - `test/`: unit tests under Vitest with fixtures per language; integration suites under `@vscode/test-electron` that drive the real screens.
 - `docs/engineering-notes.md`, `docs/build-status.md`, `docs/uat.md`: the reasons, the state, and the acceptance script written for Jeff.
+- `media/`: the Marketplace icon PNG (named by the `icon` field), the Activity Bar SVG, and any README images. `.vscodeignore` excludes `media/**` and re-includes the icon and the SVG, so GIFs never ride inside the VSIX; the Marketplace fetches README images from GitHub.
 
 Storage on disk: `.<tool>/` at the workspace root, listed in `.gitignore` except for files meant to travel with the code (decisions). Settings namespace: `<tool>.*`, with `<tool>.languageSettings.<language>.<field>` for the language block. Commands: `<tool>.<verb>`; commands that take arguments are hidden from the palette. Output channel named after the tool. Activity-bar icon and a single webview side panel with the verdict first, one primary button, and the cards.
 
@@ -82,10 +85,14 @@ Each tool measures itself with DeepTest and reports its own verdict in build-sta
 
 ## 9. Delivery
 
-Source at `C:\workspace\<Tool>`, updated in place. Every delivery: version bumped, unit and integration suites green, VSIX rebuilt, docs current, engineering notes updated. Install from the Extensions view ("Install from VSIX..."). No git writes by the assistant; Michael commits when it works, with a short subject and an engineering-reason body.
+Source at `C:\workspace\<Tool>`, updated in place. Every delivery: version bumped, unit and integration suites green, VSIX rebuilt, docs current, engineering notes updated. Install from the Extensions view ("Install from VSIX...") or with `code --install-extension <file>.vsix --force`. No git writes by the assistant; Michael commits when it works, with a short subject and an engineering-reason body. Marketplace uploads go through the publisher management page (no token needed) or `vsce publish`; DeepTest must be packaged with `--no-dependencies` (see toolkit-api.md, section 9).
 
-## 10. What is open
+## 10. Visual identity (settled 2026-09-11)
 
-- The switch-case counting rule in DeepTest (a case as one decision versus cumulative), which also sets RefactorIt's dispatch-table transform.
+Flat cut shapes on a black ground in KeepSafe's orange and green, one object per mark, drawn to read at the 42px the Extensions list uses. Marks: KeepSafe the owl (unchanged, already published), DeepTest a checklist with a green check, UntangleIt a knotted line straightening into three green bars, the pack a toolbox holding the three. The Marketplace `icon` is a 512x512 PNG per tool; the Activity Bar mark is a separate monochrome SVG for tools with a side panel (DeepTest, UntangleIt). "MikeVan's AI Development Toolkit" is the pack's display name and appears in each member's README.
+
+## 11. What is open
+
+- The switch-case counting rule in DeepTest (a case as one decision versus cumulative), which also sets UntangleIt's dispatch-table transform.
 - Whether the "ledger" that joins checkpoints to verdicts is a fourth tool or a feature of DeepTest, given KeepSafe stays untouched.
-- A shared visual identity: icon family, colour meanings (green over, light green met, yellow short, red untested, grey unreachable), and "MikeVan's AI Development Toolkit" on each Marketplace page.
+- Colour meanings in the editor overlays (green over, light green met, yellow short, red untested, grey unreachable) are DeepTest's today and should be the same in every tool that paints lines.

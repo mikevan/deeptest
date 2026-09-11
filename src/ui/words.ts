@@ -263,3 +263,38 @@ export function hoverText(line: LineResult, filePath: string, state: DecisionSta
   }
   return parts.join('\n\n');
 }
+
+/**
+ * Which way "Fix this on a function" goes. The refactor choice belongs to
+ * UntangleIt when it is installed; every other case stays with DeepTest's
+ * own brief. Pure, so the routing rule is pinned by a unit test.
+ */
+export type FunctionFixRoute = 'untangleit' | 'brief';
+
+export function functionFixRoute(mode: 'test' | 'refactor', untangleItInstalled: boolean): FunctionFixRoute {
+  return mode === 'refactor' && untangleItInstalled ? 'untangleit' : 'brief';
+}
+
+/** The description under "Break it into smaller pieces" in the quick pick. */
+export function refactorChoiceDescription(name: string, limit: number, untangleItInstalled: boolean): string {
+  return untangleItInstalled
+    ? `UntangleIt takes ${name}() and splits it until it and every piece has at most ${limit} ways through. Behaviour stays the same. UntangleIt asks before anything changes.`
+    : `Refactor ${name}() until it and every piece has at most ${limit} ways through. Behaviour stays the same.`;
+}
+
+/** What the person sees after the function has gone to UntangleIt. */
+export function untangleSentSentence(name: string): string {
+  return `${name}() is with UntangleIt. It will ask before anything changes. When it is done, press "Check my code again" and DeepTest will measure ${name}() again.`;
+}
+
+/** What the person sees when UntangleIt is installed but could not take the job. */
+export function untangleFailedSentence(name: string): string {
+  return `UntangleIt could not take ${name}(). Nothing was sent to the assistant. Open UntangleIt's log for the reason, or press "Fix this" again once UntangleIt is ready.`;
+}
+
+/** The setup screen's line about UntangleIt, installed or not. */
+export function untangleItSetupHint(installed: boolean): string {
+  return installed
+    ? 'UntangleIt is installed. "Break it into smaller pieces" hands the function to it, and it asks before anything changes.'
+    : '"Break it into smaller pieces" asks your AI assistant to refactor a function. DeepTest recommends UntangleIt, a separate extension that splits one method at a time, measures every piece afterwards, and reports the numbers. It is not installed.';
+}

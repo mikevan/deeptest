@@ -19,17 +19,17 @@
     "deeptest.depth.countComprehensions": true,
     "deeptest.depth.countExcept": true,
     "deeptest.overlay.showInlineNumbers": true,
-    "refactorit.language": "typescript",
-    "refactorit.testsPath": "test",
-    "refactorit.sourceRoot": "src",
-    "refactorit.languageSettings": {
+    "untangleit.language": "typescript",
+    "untangleit.testsPath": "test",
+    "untangleit.sourceRoot": "src",
+    "untangleit.languageSettings": {
         "typescript": {
             "runner": "auto",
             "extraArgs": ""
         }
     },
-    "refactorit.limit": 5,
-    "refactorit.rounds": 3,
-    "refactorit.showNumbers": true,
-    "refactorit.keepSafe.offerCheckpoint": true
+    "untangleit.limit": 5,
+    "untangleit.rounds": 3,
+    "untangleit.showNumbers": true,
+    "untangleit.keepSafe.offerCheckpoint": true
 }

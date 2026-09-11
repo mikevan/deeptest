@@ -6,6 +6,8 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { DeepTestConfig } from '../config';
 import { KEEPSAFE_EXTENSION_ID, keepSafeInstalled, offerCheckpoint } from '../keepsafe';
+import { UNTANGLEIT_EXTENSION_ID, handToUntangleIt, untangleItInstalled } from '../untangleit';
+import { functionFixRoute, refactorChoiceDescription, untangleFailedSentence, untangleSentSentence } from '../ui/words';
 import { FunctionFixMode, buildBrief, buildFunctionBrief } from '../report/brief';
 import { ResultState } from '../state';
 import { hashLine, recordDecision, removeDecision } from './decisions';
@@ -164,11 +166,13 @@ export async function fixFunction(deps: DecisionDeps, relativePath: string, star
     return;
   }
   const over = fn.complexity - limit;
+  const untangler = untangleItInstalled();
+  deps.output.appendLine(`UntangleIt (${UNTANGLEIT_EXTENSION_ID}) is ${untangler ? 'installed' : 'not installed'}.`);
   const pick = await vscode.window.showQuickPick<vscode.QuickPickItem & { mode: FunctionFixMode }>(
     [
       {
         label: 'Break it into smaller pieces',
-        description: `Refactor ${fn.name}() until it and every piece has at most ${limit} ways through. Behaviour stays the same.`,
+        description: refactorChoiceDescription(fn.name, limit, untangler),
         mode: 'refactor',
       },
       {
@@ -183,6 +187,19 @@ export async function fixFunction(deps: DecisionDeps, relativePath: string, star
     },
   );
   if (!pick) {
+    return;
+  }
+  if (functionFixRoute(pick.mode, untangler) === 'untangleit') {
+    // UntangleIt runs its own gates (the KeepSafe offer, then its modal)
+    // and keeps its own record of the run, so DeepTest records no decision
+    // here: the person has not yet said yes to anything. DeepTest judges
+    // the pieces on the next check like any other change.
+    const outcome = await handToUntangleIt(relativePath, fn.startLine, (l) => deps.output.appendLine(l));
+    if (outcome === 'sent') {
+      void vscode.window.showInformationMessage(untangleSentSentence(fn.name));
+    } else {
+      void vscode.window.showWarningMessage(untangleFailedSentence(fn.name));
+    }
     return;
   }
   const task = pick.mode === 'refactor' ? `break ${fn.name}() into pieces that each have at most ${limit} ways through, without changing what it does` : `write tests for every way through ${fn.name}()`;

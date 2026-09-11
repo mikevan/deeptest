@@ -1,25 +1,25 @@
-# RefactorIt
+# UntangleIt
 
 "An assistant that says 'done' is not evidence. The numbers are."
 
-![RefactorIt in action: find, checkpoint, untangle, measure again](media/refactorit.gif)
+![UntangleIt in action: find, checkpoint, untangle, measure again](media/untangleit.gif)
 
-RefactorIt untangles one method at a time. It counts the ways through every method in your project, lists the ones too tangled to trust, and hands your AI assistant a strict brief to break each one into smaller pieces without changing what it does. Then it runs your own tests and measures every piece. You decide at every step. RefactorIt never edits code itself, never restores anything, and never accepts the assistant's result on your behalf.
+UntangleIt untangles one method at a time. It counts the ways through every method in your project, lists the ones too tangled to trust, and hands your AI assistant a strict brief to break each one into smaller pieces without changing what it does. Then it runs your own tests and measures every piece. You decide at every step. UntangleIt never edits code itself, never restores anything, and never accepts the assistant's result on your behalf.
 
-### Why RefactorIt
+### Why UntangleIt
 
-- **Measured, not claimed**: After the assistant says done, RefactorIt runs your tests and measures every piece against your limit. "Untangled" is a number, not a feeling.
+- **Measured, not claimed**: After the assistant says done, UntangleIt runs your tests and measures every piece against your limit. "Untangled" is a number, not a feeling.
 - **Plain words first**: "14 methods are too tangled. The worst is visit() with 23 ways through." The engineer's numbers sit behind one switch.
 - **A brief a contractor would recognise**: Behaviour unchanged, existing tests untouched, every piece within the limit, run the whole suite before saying done. It even says "5 or less does not mean reduce by 5", because an assistant once did exactly that.
 - **You decide, always**: Nothing is sent before "Yes, send it". After each round you choose Send another round or Stop here.
-- **Your own runner**: pytest, Jest, or Vitest, the one your project already has. RefactorIt ships no runtime.
-- **100% local**: Every untangling is recorded in `.refactorit/runs.json` in your workspace, meant to be committed with the code. No model, no key, no network.
+- **Your own runner**: pytest, Jest, or Vitest, the one your project already has. UntangleIt ships no runtime.
+- **100% local**: Every untangling is recorded in `.untangleit/runs.json` in your workspace, meant to be committed with the code. No model, no key, no network.
 
-### RefactorIt + KeepSafe + DeepTest: Partners in Protection
+### UntangleIt + KeepSafe + DeepTest: Partners in Protection
 
-"DeepTest finds it. KeepSafe remembers it. RefactorIt untangles it."
+"DeepTest finds it. KeepSafe remembers it. UntangleIt untangles it."
 
-When DeepTest flags a function with too many ways through it, "Break it into smaller pieces" hands the job to RefactorIt. Before the brief goes out, RefactorIt offers a KeepSafe checkpoint; that is the undo. If the untangling breaks tests or leaves pieces over the limit, the report says so and the checkpoint is your way back.
+When DeepTest flags a function with too many ways through it, "Break it into smaller pieces" hands the job to UntangleIt. Before the brief goes out, UntangleIt offers a KeepSafe checkpoint; that is the undo. If the untangling breaks tests or leaves pieces over the limit, the report says so and the checkpoint is your way back.
 
 ### Workflow
 
@@ -27,12 +27,12 @@ When DeepTest flags a function with too many ways through it, "Break it into sma
 
 ### Quick Start
 
-1. Install RefactorIt from the VS Code Marketplace.
-2. Open the RefactorIt panel and select Find the tangled methods. The setup screen opens once, already filled in; select Save and find the tangled methods.
+1. Install UntangleIt from the VS Code Marketplace.
+2. Open the UntangleIt panel and select Find the tangled methods. The setup screen opens once, already filled in; select Save and find the tangled methods.
 3. On the worst method, select Untangle this method. Take the checkpoint when offered, read the dialog, select Yes, send it. The brief goes to the editor's chat and to your clipboard.
 4. When the assistant says done, select Measure the method again. Keep the result, send another round, or restore the checkpoint.
 
-![RefactorIt: 14 methods are too tangled; the worst is visit() with 23](media/panel.png)
+![UntangleIt: 14 methods are too tangled; the worst is visit() with 23](media/panel.png)
 
 ---
 
@@ -40,15 +40,15 @@ When DeepTest flags a function with too many ways through it, "Break it into sma
 
 **The list, worst first**: Every method over your limit, with a plain sentence saying what its number means. One method per card, the worst at the top.
 
-**Untangle this method**: The one place RefactorIt hands work to an AI, so it asks first. A KeepSafe checkpoint is offered, then one dialog that names the method and says what will happen. The brief states the target three ways, quotes the method, and holds the assistant to rules: behaviour unchanged, existing tests untouched, every piece within the limit, whole suite green before saying done.
+**Untangle this method**: The one place UntangleIt hands work to an AI, so it asks first. A KeepSafe checkpoint is offered, then one dialog that names the method and says what will happen. The brief states the target three ways, quotes the method, and holds the assistant to rules: behaviour unchanged, existing tests untouched, every piece within the limit, whole suite green before saying done.
 
 **Measure the method again**: Runs your tests through your own runner and measures every piece. The answer is one of three sentences: untangled into N pieces, every one within your limit; not done, these pieces are still over; or the untangling broke tests.
 
-**Rounds**: If it is not done, choose Send another round or Stop here, up to the number of rounds you set (default 3). Then RefactorIt stops and hands the result back to you.
+**Rounds**: If it is not done, choose Send another round or Stop here, up to the number of rounds you set (default 3). Then UntangleIt stops and hands the result back to you.
 
-**A record you can commit**: What was sent, when, by whose decision, and what came back, in `.refactorit/runs.json` beside the code.
+**A record you can commit**: What was sent, when, by whose decision, and what came back, in `.untangleit/runs.json` beside the code.
 
-**Measure for other tools**: A silent command, `refactorit.api.measure`, returns a file's numbers so DeepTest and RefactorIt never disagree about the same method.
+**Measure for other tools**: A silent command, `untangleit.api.measure`, returns a file's numbers so DeepTest and UntangleIt never disagree about the same method.
 
 ### Commands
 
@@ -102,7 +102,7 @@ Nothing else. No native modules, no extra extensions. KeepSafe and DeepTest are 
 
 ## Settings
 
-All under `refactorit.`:
+All under `untangleit.`:
 
 | Setting | Default | Purpose |
 |---|---|---|
@@ -119,7 +119,7 @@ All under `refactorit.`:
 
 ## Known Limits
 
-- RefactorIt measures; it does not edit. If the assistant ignores the brief, the measurement says so and the checkpoint is your way back.
+- UntangleIt measures; it does not edit. If the assistant ignores the brief, the measurement says so and the checkpoint is your way back.
 - Recursion is found by name within one file; cross-file recursion does not add to the count.
 - The panel header's build number updates on a window reload, not on "Restart Extensions".
 

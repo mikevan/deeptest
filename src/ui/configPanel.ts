@@ -10,6 +10,8 @@ import { DeepTestConfig, writeConfig } from '../config';
 import { LanguageGuess } from '../detect/language';
 import { allPlugins } from '../languages/registry';
 import { showKeepSafeInExtensionsView, KEEPSAFE_MARKETPLACE_URL } from '../keepsafe';
+import { showUntangleItInExtensionsView, UNTANGLEIT_MARKETPLACE_URL } from '../untangleit';
+import { untangleItSetupHint } from './words';
 import { Detection, FieldSpec } from '../languages/types';
 
 export interface ConfigDefaults {
@@ -23,10 +25,12 @@ export interface ConfigDefaults {
   detection?: Detection;
   /** Whether the KeepSafe extension is installed in this editor. */
   keepSafeInstalled: boolean;
+  /** Whether the UntangleIt extension is installed in this editor. */
+  untangleItInstalled: boolean;
 }
 
 interface PanelMessage {
-  type: 'save' | 'saveAndRun' | 'redetect' | 'showKeepSafe';
+  type: 'save' | 'saveAndRun' | 'redetect' | 'showKeepSafe' | 'showUntangleIt';
   values?: Record<string, unknown>;
   languageId?: string;
 }
@@ -67,6 +71,10 @@ export class ConfigPanel {
       ConfigPanel.current = undefined;
     });
     this.panel.webview.onDidReceiveMessage(async (msg: PanelMessage) => {
+      if (msg.type === 'showUntangleIt') {
+        await showUntangleItInExtensionsView();
+        return;
+      }
       if (msg.type === 'showKeepSafe') {
         await showKeepSafeInExtensionsView();
         return;
@@ -209,6 +217,14 @@ export class ConfigPanel {
   <button id="showKeepSafe">Show KeepSafe in the Extensions view</button>`
   }
 
+  <h2>When a function is too tangled</h2>
+  ${
+    d.untangleItInstalled
+      ? `<p class="hint">${untangleItSetupHint(true)}</p>`
+      : `<p class="hint">${untangleItSetupHint(false)} <a href="${UNTANGLEIT_MARKETPLACE_URL}">UntangleIt on the VS Code Marketplace</a>.</p>
+  <button id="showUntangleIt">Show UntangleIt in the Extensions view</button>`
+  }
+
   <details>
     <summary>Advanced: what counts as a condition</summary>
     <p class="hint">A line needs one test for each condition that guards it. These settings decide what counts as a condition. Leave them alone unless you know why you are changing them.</p>
@@ -259,6 +275,10 @@ export class ConfigPanel {
   }
   document.getElementById('save').addEventListener('click', () => vscode.postMessage({ type: 'save', values: collect() }));
   document.getElementById('saveRun').addEventListener('click', () => vscode.postMessage({ type: 'saveAndRun', values: collect() }));
+  const showUntangleIt = document.getElementById('showUntangleIt');
+  if (showUntangleIt) {
+    showUntangleIt.addEventListener('click', () => vscode.postMessage({ type: 'showUntangleIt' }));
+  }
   const showKeepSafe = document.getElementById('showKeepSafe');
   if (showKeepSafe) {
     showKeepSafe.addEventListener('click', () => vscode.postMessage({ type: 'showKeepSafe' }));

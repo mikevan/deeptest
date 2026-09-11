@@ -323,12 +323,20 @@ function now called something else.
 Both fixes share one gate function (`gates` in src/decisions/commands.ts):
 KeepSafe offer, then the modal confirmation with the task spelled out.
 
-### Where "Refactor It" will plug in
+### Where UntangleIt will plug in
+
+Named 2026-09-11: the tool is UntangleIt (`prs.untangleit`, command
+`untangleit.method`, records `.untangleit/`). The Marketplace refused the
+tool's first display name as too similar to an existing listing, and a
+dormant Visual Studio extension by mynkow shares that first name. Nothing
+in DeepTest's source named the sibling yet, so the rename touched only
+these notes, the README, and the workspace settings. The sibling file, when
+it is written, is src/untangleit.ts.
 
 Michael's next tool refactors a method over a configurable complexity
 limit until it and every method produced from it are within the limit,
 responsibly. DeepTest's "Break it into smaller pieces" choice is the seam:
-today it hands a refactor brief to the generic assistant; when Refactor It
+today it hands a refactor brief to the generic assistant; when UntangleIt
 exists, that one choice routes to it instead, through its public command,
 the same one-directional pattern as KeepSafe, with DeepTest staying the
 judge afterwards. The place to change is `fixFunction` in
@@ -346,8 +354,8 @@ its foot so a screenshot always says which build it came from.
 ## Publisher
 
 DeepTest publishes under `prs`, the Marketplace identifier for Project
-Revive Solutions, LLC, so its extension id is `prs.deeptest`. Refactor It
-will be `prs.refactorit`. KeepSafe stays `KeepSafe.keepsafe`: it is already
+Revive Solutions, LLC, so its extension id is `prs.deeptest`. UntangleIt
+is `prs.untangleit` (named on 2026-09-11, see above). KeepSafe stays `KeepSafe.keepsafe`: it is already
 live under that publisher, the Marketplace cannot move a listing between
 publishers, and a republish would start its install count and reviews from
 zero. Its id lives in one place, src/keepsafe.ts.
@@ -484,7 +492,7 @@ the Python and TypeScript walkers, McCabe's fork count, the function
 finders, the 27 whitepaper tests, and docs/measures.md with every rule and
 every reading chosen. DeepTest depends on it (`file:../complexity` until the
 repo is on GitHub, then `github:mikevan/complexity#<commit>`), and
-RefactorIt will depend on the same package, so the two tools cannot
+UntangleIt will depend on the same package, so the two tools cannot
 disagree about the same function. The package holds no grammars and starts
 no parser: DeepTest still walks the tree for routes and depth and hands
 the function nodes over; the package hands back
@@ -502,3 +510,38 @@ compiles (`npm install` in C:\workspace\complexity runs its `prepare`
 script, which is the build). `npm install` in DeepTest then symlinks it
 and esbuild bundles it into dist/extension.js like any other dependency;
 the VSIX carries no reference to the folder.
+
+## The hand-off to UntangleIt (0.4.3)
+
+Why: "Break it into smaller pieces" built a refactor brief and sent it to
+the chat assistant, and the docs had called the routing to the untangling
+tool "next" since 2026-09-06. With UntangleIt on the Marketplace, DeepTest
+handing the job to the chat assistant instead of the sibling that
+measures every piece afterwards would have been the toolkit contradicting
+its own thesis on its first public day.
+
+What: src/untangleit.ts mirrors src/keepsafe.ts (id `prs.untangleit`,
+command `untangleit.method`, installed check, Extensions-view opener,
+Marketplace link). In `fixFunction`, when the person picks the refactor
+choice and UntangleIt is installed, DeepTest calls `untangleit.method`
+with `{ path, startLine }` and stops. UntangleIt runs its own gates (the
+KeepSafe offer, then its modal), hands its own brief, and keeps its own
+run record; DeepTest records no decision at that point because the person
+has not yet said yes to anything, and judges the pieces on the next
+check. When UntangleIt is not installed, nothing changes: DeepTest's own
+brief and gates, and a recommendation with a link on the setup screen
+under "When a function is too tangled". The routing rule
+(`functionFixRoute`) and every new sentence live in src/ui/words.ts so
+the unit tests pin them without a vscode import.
+
+What was found on the other side: `untangleit.method` refused a method
+that was not in UntangleIt's last measure ("Press Find the tangled
+methods first"), which is every call from DeepTest on a fresh editor.
+UntangleIt 0.1.8 now measures the file on demand when the method is not
+in its state, and only complains when no method starts on that line. That
+change is in UntangleIt's own tree and notes; DeepTest depends on the
+published command, not on that behaviour.
+
+Not done: the refactor brief in src/report/brief.ts still exists for the
+not-installed case. The 2026-09-06 decision was to move it to UntangleIt;
+it stays here as the fallback until UntangleIt is the common case.

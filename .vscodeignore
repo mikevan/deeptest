@@ -15,7 +15,7 @@ vitest.config.ts
 *.vsix
 
 .keepsafe/**
-.refactorit/**
+.untangleit/**
 _to_delete/**
 Claude outputs/**
 *.zip

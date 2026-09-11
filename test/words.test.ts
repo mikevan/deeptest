@@ -2,7 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { scoreLine, summarize, analyzeFile } from '../src/engine/density';
 import { FileCoverage, FileStructure } from '../src/engine/types';
-import { badge, decisionSentence, findingSentence, hoverText, lineCaption, summaryRows, tangleSentence, testsSentence, threeNumbers, verdict } from '../src/ui/words';
+import { badge, decisionSentence, findingSentence, functionFixRoute, hoverText, lineCaption, refactorChoiceDescription, summaryRows, tangleSentence, testsSentence, threeNumbers, untangleFailedSentence, untangleItSetupHint, untangleSentSentence, verdict } from '../src/ui/words';
 
 const plain = { showNumbers: false };
 const numbers = { showNumbers: true };
@@ -118,4 +118,24 @@ test('testsSentence and hoverText', () => {
   assert.match(ran, /ran when the program started/);
   assert.match(hoverText({ ...scoreLine(1, [], 0), status: 'declaration' }, 'a.py', { kind: 'none' }, '', plain), /not scored/);
   assert.match(hoverText({ ...scoreLine(1, [], 0), status: 'unreachable' }, 'a.py', { kind: 'none' }, '', plain), /can never run/);
+});
+
+test('functionFixRoute: the refactor choice goes to UntangleIt only when it is installed', () => {
+  assert.equal(functionFixRoute('refactor', true), 'untangleit');
+  assert.equal(functionFixRoute('refactor', false), 'brief');
+  assert.equal(functionFixRoute('test', true), 'brief');
+  assert.equal(functionFixRoute('test', false), 'brief');
+});
+
+test('UntangleIt words: complete sentences, exact control labels, the sibling named only when present', () => {
+  assert.equal(
+    refactorChoiceDescription('calc', 10, true),
+    'UntangleIt takes calc() and splits it until it and every piece has at most 10 ways through. Behaviour stays the same. UntangleIt asks before anything changes.',
+  );
+  assert.equal(refactorChoiceDescription('calc', 10, false), 'Refactor calc() until it and every piece has at most 10 ways through. Behaviour stays the same.');
+  assert.equal(untangleSentSentence('calc'), 'calc() is with UntangleIt. It will ask before anything changes. When it is done, press "Check my code again" and DeepTest will measure calc() again.');
+  assert.equal(untangleFailedSentence('calc'), 'UntangleIt could not take calc(). Nothing was sent to the assistant. Open UntangleIt\'s log for the reason, or press "Fix this" again once UntangleIt is ready.');
+  assert.equal(untangleItSetupHint(true), 'UntangleIt is installed. "Break it into smaller pieces" hands the function to it, and it asks before anything changes.');
+  assert.ok(untangleItSetupHint(false).startsWith('"Break it into smaller pieces" asks your AI assistant'));
+  assert.ok(untangleItSetupHint(false).endsWith('It is not installed.'));
 });
