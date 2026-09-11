@@ -3,18 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {
-  TypeScriptCoverageSource,
-  buildCoverages,
-  detectRunner,
-  findVitestConfig,
-  guessSourceRoot,
-  guessTestsPath,
-  isTestFile,
-  parseJestSummary,
-  parseVitestSummary,
-  walkSources,
-} from '../src/languages/typescript/coverage';
+import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, coverageIstanbulSpec } from '../src/languages/typescript/coverage';
 import { typescriptPlugin } from '../src/languages/typescript';
 import { analyze } from '../src/engine/density';
 import { DEFAULT_DEPTH_OPTIONS } from '../src/engine/types';
@@ -113,7 +102,7 @@ test('discoverTests and checkEnvironment on the fixtures', async () => {
   assert.ok(none.fix);
 });
 
-async function endToEnd(fixture: string, expectedTestIds: string[], line25: 'declaration' | 'untested'): Promise<void> {
+async function endToEnd(fixture: string, expectedTestIds: string[], line25: 'declaration' | 'untested'): Promise<string[]> {
   const source = typescriptPlugin.createCoverageSource();
   const log: string[] = [];
   const run = await source.run({ workspaceRoot: fixture, settings: settings('test', 'src'), log: (l) => log.push(l) });
@@ -150,6 +139,7 @@ async function endToEnd(fixture: string, expectedTestIds: string[], line25: 'dec
     ['x === 0', 'is also true'],
   ]);
   fs.rmSync(path.join(fixture, '.deeptest'), { recursive: true, force: true });
+  return log;
 }
 
 test('end to end with Jest', { timeout: 120_000 }, async () => {
@@ -158,4 +148,29 @@ test('end to end with Jest', { timeout: 120_000 }, async () => {
 
 test('end to end with Vitest (source-mapped TypeScript)', { timeout: 120_000 }, async () => {
   await endToEnd(VITEST_FIXTURE, ['test/calc.test.ts::classify > both', 'test/calc.test.ts::classify > x only', 'test/calc.test.ts::safeDiv'], 'untested');
+});
+
+test('end to end with Vitest from a project outside the repository: the hook is loaded from the project, not the install folder', { timeout: 120_000 }, async () => {
+  // Vite refuses a setup file outside the project root (server.fs.allow). The
+  // repository's fixtures sit under the repository root, so the suite never
+  // saw it; a real project never contains the extension's install folder.
+  // The hook is therefore copied into <project>/.deeptest/hooks and loaded
+  // from there. This test runs the fixture from a temporary folder whose only
+  // link to the repository is node_modules, which is exactly a user's shape.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'deeptest-vitest-'));
+  fs.cpSync(VITEST_FIXTURE, tmp, { recursive: true, filter: (p) => !p.includes('node_modules') });
+  fs.symlinkSync(path.join(process.cwd(), 'node_modules'), path.join(tmp, 'node_modules'), 'junction');
+  const log = await endToEnd(tmp, ['test/calc.test.ts::classify > both', 'test/calc.test.ts::classify > x only', 'test/calc.test.ts::safeDiv'], 'untested');
+  // endToEnd cleans the project's .deeptest folder when it is done, so the
+  // evidence is the log: the hook was copied into the project, and the
+  // wrapper config the runner was given points at that copy.
+  const hookDir = path.join(tmp, '.deeptest', 'hooks');
+  assert.ok(log.some((l) => l === `Hook copied into ${hookDir}.`), `no copy line in the log:\n${log.join('\n')}`);
+  assert.ok(log.some((l) => l.includes('--config') && l.includes(path.join(tmp, '.deeptest', 'vitest.config.mjs'))), 'the wrapper config lives in the project');
+});
+
+test('the coverage package install is pinned to the project\'s Vitest major', () => {
+  assert.equal(coverageIstanbulSpec('4.1.11'), '@vitest/coverage-istanbul@4');
+  assert.equal(coverageIstanbulSpec('3.2.7'), '@vitest/coverage-istanbul@3');
+  assert.equal(coverageIstanbulSpec(''), '@vitest/coverage-istanbul');
 });

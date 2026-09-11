@@ -622,3 +622,152 @@ one value costs one, like a switch), so the MBCC figure on existing
 functions moves. Nothing in DeepTest's arithmetic reads it, so no
 DeepTest verdict changes; the comparison table and the tangle numbers
 behind the switch do. Rebuild the library before this tree.
+
+## 1.0 survey: the seven HelloWorld ports through the plugin as it stands (2026-09-12)
+
+Method: the seven ports in C:\workspace\HelloWorlds (copied to test/fixtures/
+helloworld-* by scripts/sync-fixtures.mjs) were driven headlessly through
+the language layer exactly as the extension drives it: guessLanguage, the
+plugin's detect(), checkEnvironment(), run(), then the structure parser on
+every measured file and the engine's analyze(). No VS Code. Every port has
+the same program: greet fully tested, names thinly tested, and
+pickGreeting() nested five deep with no tests, 27 ways through, Campbell
+73, MBCC 97, eleven tests (ten in Python).
+
+| Port | Detection said | Environment | Run | Per-test attribution | Villain found | Source files the plugin never saw |
+|---|---|---|---|---|---|---|
+| python | tests/, pyproject pytest | ok | 10 passed | 17 lines | pick_greeting 27/73/97 | none |
+| react-jest | jest, package.json key | ok | 11 passed | 18 lines | pickGreeting 27/73/97 | none |
+| react-vitest | vitest, vite.config.ts | ok | **failed: "vitest produced no coverage"** (finding 1); 11 passed once the hook was reachable | 18 lines after the fix | pickGreeting 27/73/97 after the fix | none |
+| vue-vitest | vitest, vite.config.ts | ok | 11 passed (after finding 1) | 17 lines | **NOT FOUND** | App.vue, Greeting.vue, GreetingPicker.vue |
+| svelte-vitest | vitest, vite.config.ts | ok | 11 passed (after finding 1) | 17 lines | **NOT FOUND** | App.svelte, Greeting.svelte, GreetingPicker.svelte |
+| angular-vitest | "Found vitest." | needs @vitest/coverage-istanbul; the offered install fetched 5.0.0 against vitest 4.1.11 | **failed: "coverageFilesDirectory is required"** (finding 3b); driving the vitest binary directly bypasses the Angular builder anyway (finding 3a) | works through `ng test` (see below) but points at bundle chunks, not sources (finding 3c) | ScheduleService.pickGreeting 27/73/97 once measured | all of src/app until the builder path is used |
+| angular-karma | **"No test runner found. Install Vitest or Jest."** (finding 4) | not ok | not attempted | none | none | all |
+
+### Finding 1: the Vitest hook cannot be loaded from outside the project root. Production bug, every Vitest project.
+
+The generated wrapper config sets `test.setupFiles` to the hook's absolute
+path in the extension's install folder. Vite refuses to load it: "Failed
+to load url .../hooks/vitest.mjs. Does the file exist?", which is Vite's
+wording for a file its `server.fs.allow` list rejects, and the default
+allow list is the project root. The file exists; the path form does not
+matter (absolute, file://, and relative all fail); the extension's install
+folder is never inside a person's project. Two fixes were confirmed on
+react-vitest: adding `server: { fs: { allow: [hooksDir, '.'] } }` to the
+wrapper, and copying the hook and attribution.cjs into the project's own
+.deeptest/ folder and pointing setupFiles there. The second is the one to
+ship, because the Angular builder needs it too (finding 3c) and it removes
+the dependence on Vite's allow list altogether. DeepTest's own suite never
+caught this because its fixture runs use the repository's hooks/ folder,
+which is inside the repository root. Ships as 1.0.1, before anything else
+in the slot.
+
+### Finding 2: .vue and .svelte files are invisible, and the report is falsely clean.
+
+The plugin's source-extension pattern and the coverage include glob cover
+js, jsx, ts, tsx, mjs, and cjs. A single-file component is neither walked
+nor instrumented, so on the Vue and Svelte ports the tests pass, coverage
+reads 60.71%, "Hardest to test" says every function is within the limit,
+and the villain does not exist. This is the failure the toolkit exists to
+prevent: a clean verdict on code nobody measured. Phase 1 (walk them, show
+them red) and phase 2 (parse the script block with its line numbers) of the
+1.0 plan are the fix, and their order matters: red before parsed, never
+invisible.
+
+### Finding 3: Angular is a builder, not a binary.
+
+3a. detectRunner finds `vitest` in node_modules and drives vitest.mjs with
+the wrapper config. An Angular project has no vite config; the tests need
+the Angular compiler and TestBed, which only the builder provides. The
+driver must detect `angular.json` with `@angular/build:unit-test` and run
+`ng test` instead. The builder has everything the driver needs, verified
+with `ng test --help` on Angular CLI 22.1.8: `--setup-files`,
+`--coverage`, `--coverage-include`, `--coverage-reporters json`,
+`--runner karma|vitest`, `--watch=false`. Both the Vitest and the Karma
+projects go through this one builder (`"runner": "karma"` in angular.json
+for the latter), so the Angular driver is one driver with a runner switch.
+
+3b. The install offer for @vitest/coverage-istanbul is unpinned. On a
+Vitest 4 project npm installed 5.0.0 (peer: vitest 5.0.0), and every test
+file failed with "coverageFilesDirectory is required". The offer must pin
+the coverage package to the project's Vitest major
+(`@vitest/coverage-istanbul@4` here). Same bug, same fix, on every Vitest
+project whose Vitest is not the newest major.
+
+3c. The builder bundles with esbuild before running, and `--setup-files`
+paths resolve relative to the project root and are bundled too: an
+absolute path is appended to the root ("Could not resolve
+.../angular-vitest/sessions/.../hooks/vitest.mjs"), and inside the bundle
+`import.meta.url` no longer points at the hooks folder, so the hook's
+`require('./attribution.cjs')` fails. With the hook copied to
+.deeptest/vitest.mjs and attribution.cjs resolved through an environment
+variable (DEEPTEST_HOOKS_DIR), `ng test --watch=false --coverage
+--coverage-reporters json --coverage-include 'src/**/*.ts' --setup-files
+.deeptest/vitest.mjs` ran 11 tests, wrote coverage-final.json under
+coverage/<project>/ with every src file including schedule.service.ts
+(without --coverage-include the report holds only the files a test
+loaded, and the villain is absent), and wrote per-test attribution. But
+the attribution names bundle chunks (`chunk-G3X6D2YX.js`,
+`spec-app-greet.js`), not source files: the live Istanbul counters the
+hook snapshots are on the bundle, while the JSON report is source-mapped
+by the coverage provider afterwards. The driver has to map the hook's
+lines back through the bundle's source maps, or take attribution from a
+per-test coverage dump the provider has already mapped. This is the one
+open engineering question in 1.0 and it is phase 3's first job.
+
+### Finding 4: a Karma project is told to install Vitest.
+
+With neither jest nor vitest in package.json, detection says "No test
+runner found in package.json. Install Vitest or Jest, or pick one below."
+and the environment check offers "Install Vitest". On an Angular Karma
+project that advice is wrong and, followed, harmful. Detection must
+recognise angular.json's runner before it concludes there is no runner,
+and the sentence must never recommend a runner into a project that has
+one.
+
+### What worked without change
+
+React on Jest is fully served today: detection, environment, run, per-test
+attribution on 18 lines, the villain first at 27/73/97, no file missed.
+React on Vitest is fully served once finding 1 is fixed. The structure
+parser reads .tsx and .jsx correctly, including the component files.
+
+### Revised order for the 1.0 phases
+
+1. 1.0.1: finding 1 (hook copied into .deeptest/, attribution resolved by
+   environment variable) and finding 3b (pinned install). Both are
+   production bugs in 1.0.0 and both are small.
+2. 1.0.2: finding 4 and phase 1 (framework detection; .vue and .svelte
+   walked and shown red).
+3. 1.0.3: phase 2 (single-file component script blocks parsed).
+4. 1.0.4: the Angular driver through the builder, Vitest runner, with the
+   source-map question answered (3a, 3c).
+5. 1.0.5: the Karma runner through the same builder.
+6. 1.0.6 and 1.0.7 as planned.
+
+## The Vitest hook moves into the project, and the install is pinned (1.0.1)
+
+Finding 1 of the 1.0 survey, fixed: the Vitest hook and attribution.cjs
+are copied into <project>/.deeptest/hooks/ before every run and
+test.setupFiles points there, inside the project root, where Vite's
+server.fs.allow permits it. The helper is found through DEEPTEST_HOOKS_DIR
+instead of a relative require, so when a bundling runner (the Angular
+builder, 1.0.4) rewrites import.meta.url the path still resolves. The
+Jest driver is unchanged: Node loads its hook by absolute path and has no
+allow list. Alternative rejected: adding `server.fs.allow` to the wrapper
+config. It works (confirmed on react-vitest), but it depends on a Vite
+setting that a project's own config could override, and the Angular
+builder needs the copy anyway.
+
+Finding 3b, fixed: the coverage-package install is pinned to the
+project's Vitest major (`coverageIstanbulSpec`: "@vitest/coverage-istanbul@4"
+for Vitest 4.1.11). The sentence and the button carry the pinned spec.
+
+Verified with the plugin compiled from this tree and the hooks folder
+outside every project: react-vitest 11 passed, attribution on 18 lines,
+villain first; vue-vitest and svelte-vitest 11 passed (their villains
+stay invisible until 1.0.2 and 1.0.3). New tests: the Vitest end-to-end
+run from a temporary folder outside the repository (the shape the suite
+had never exercised, which is why the bug lived through 0.2 to 1.0), and
+the pin. tsconfig now excludes test/fixtures, since the HelloWorld copies
+carry framework sources the extension's compiler must not see.

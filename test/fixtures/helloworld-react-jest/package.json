@@ -1,0 +1,31 @@
+{
+  "name": "helloworld-react-jest",
+  "private": true,
+  "version": "1.0.0",
+  "description": "HelloWorld for DeepTest and UntangleIt: React, JavaScript, Jest with babel-jest. Same functions, same tests, same villain as the Python original.",
+  "scripts": {
+    "test": "jest"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.27.0",
+    "@babel/preset-env": "^7.27.0",
+    "@babel/preset-react": "^7.27.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "babel-jest": "^30.0.0",
+    "jest": "^30.0.0",
+    "jest-environment-jsdom": "^30.0.0"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "setupFilesAfterEnv": ["<rootDir>/src/test-setup.js"],
+    "testMatch": ["<rootDir>/src/**/*.test.{js,jsx}"]
+  },
+  "babel": {
+    "presets": [["@babel/preset-env", { "targets": { "node": "current" } }], ["@babel/preset-react", { "runtime": "automatic" }]]
+  }
+}

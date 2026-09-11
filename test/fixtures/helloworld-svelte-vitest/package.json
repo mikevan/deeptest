@@ -1,0 +1,23 @@
+{
+  "name": "helloworld-svelte-vitest",
+  "private": true,
+  "version": "1.0.0",
+  "description": "HelloWorld for DeepTest and UntangleIt: Svelte 5, TypeScript, Vite, Vitest. Same functions, same tests, same villain as the Python original.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/svelte": "^5.2.0",
+    "@vitest/coverage-istanbul": "^3.2.0",
+    "jsdom": "^26.1.0",
+    "svelte": "^5.28.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.3.0",
+    "vitest": "^3.2.0"
+  }
+}

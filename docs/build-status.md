@@ -1,6 +1,6 @@
 # DeepTest: build status and run instructions
 
-Updated 2026-09-12 (1.0.0). Companion to vscode-density-extension-spec.md.
+Updated 2026-09-12 (1.0.1, in the tree). Companion to vscode-density-extension-spec.md.
 Source tree and VSIX live at C:\workspace\DeepTest on Michael's machine. The
 authoritative copy of this file is docs/build-status.md in that tree.
 Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
@@ -14,6 +14,23 @@ and every extension is tagged 1.0.0 together (DeepTest, UntangleIt, the
 pack, and the library). From here the minor number moves once per language
 across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
 numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
+
+## 2026-09-12, 1.0.1: the first slot of the Language Expansion series begins
+
+- HelloWorlds (github.com/mikevan/HelloWorlds): seven ports of the same
+  program, every villain at 27/73/97; copied into test/fixtures/helloworld-*
+  by scripts/sync-fixtures.mjs.
+- The 1.0 survey (docs/engineering-notes.md, "1.0 survey"): react-jest and
+  python fully served; react-vitest failed in production (hook outside the
+  project root); vue and svelte falsely clean; angular needs the builder;
+  karma told to install Vitest.
+- 1.0.1 fixes the two production bugs: the Vitest hook is copied into
+  .deeptest/hooks and loaded from there, and the coverage-package install
+  is pinned to the Vitest major. Two new tests (one end to end from a
+  temporary folder). 187 unit tests expected.
+- Verify on HelloWorlds\react-vitest opened in VS Code: "Check my code"
+  reports 11 tests passed and pickGreeting() first; before 1.0.1 it said
+  "vitest produced no coverage".
 
 ## 2026-09-12, second build: three changes in the tree (built as 0.4.5, shipped as 1.0.0)
 

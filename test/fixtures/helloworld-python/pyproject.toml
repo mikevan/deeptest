@@ -1,0 +1,9 @@
+[project]
+name = "helloworld"
+version = "0.1.0"
+description = "A small, deliberately uneven demo project for DeepTest and UntangleIt."
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

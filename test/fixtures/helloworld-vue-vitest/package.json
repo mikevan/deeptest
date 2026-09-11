@@ -1,0 +1,24 @@
+{
+  "name": "helloworld-vue-vitest",
+  "private": true,
+  "version": "1.0.0",
+  "description": "HelloWorld for DeepTest and UntangleIt: Vue 3 single-file components, TypeScript, Vite, Vitest. Same functions, same tests, same villain as the Python original.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.0",
+    "@vitest/coverage-istanbul": "^3.2.0",
+    "@vue/test-utils": "^2.4.6",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.3.0",
+    "vitest": "^3.2.0"
+  }
+}

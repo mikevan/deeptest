@@ -127,6 +127,12 @@ export function detectRunner(workspaceRoot: string): Runner | undefined {
   return undefined;
 }
 
+/** The coverage package pinned to the project's Vitest major: "@vitest/coverage-istanbul@4" for Vitest 4.x. */
+export function coverageIstanbulSpec(vitestVersion: string): string {
+  const major = /^(\d+)\./.exec(vitestVersion)?.[1];
+  return major ? `@vitest/coverage-istanbul@${major}` : '@vitest/coverage-istanbul';
+}
+
 export function guessTestsPath(workspaceRoot: string): string {
   for (const candidate of ['test', 'tests', '__tests__', 'spec', 'src/__tests__']) {
     if (fs.existsSync(path.join(workspaceRoot, candidate))) {
@@ -316,12 +322,16 @@ export class TypeScriptCoverageSource implements CoverageSource {
       // version is decoration
     }
     if (runner === 'vitest' && !resolveModuleDir(ctx.workspaceRoot, '@vitest/coverage-istanbul')) {
-      problems.push('Vitest needs @vitest/coverage-istanbul for per-test attribution.');
+      // The coverage package must match Vitest's major: an unpinned install
+      // fetched 5.0.0 into a Vitest 4 project and every test file failed
+      // with "coverageFilesDirectory is required" (1.0 survey, 2026-09-12).
+      const spec = coverageIstanbulSpec(runnerVersion);
+      problems.push(`Vitest needs ${spec} for per-test attribution.`);
       return {
         ok: false,
         summary: `Node ${nodeVersion}, vitest ${runnerVersion}`,
         problems,
-        fix: { title: 'Install @vitest/coverage-istanbul', command: 'npm', args: ['install', '--save-dev', '@vitest/coverage-istanbul'] },
+        fix: { title: `Install ${spec}`, command: 'npm', args: ['install', '--save-dev', spec] },
       };
     }
     return { ok: true, summary: `Node ${nodeVersion}, ${runner} ${runnerVersion}`, problems: [] };
@@ -338,7 +348,16 @@ export class TypeScriptCoverageSource implements CoverageSource {
     fs.rmSync(attrDir, { recursive: true, force: true });
     fs.rmSync(coverageDir, { recursive: true, force: true });
     fs.mkdirSync(attrDir, { recursive: true });
-    const env = { ...process.env, DEEPTEST_ATTRIBUTION_DIR: attrDir, CI: process.env.CI ?? 'true', NO_COLOR: '1', FORCE_COLOR: '0' };
+    // The hook and its helper are copied into .deeptest/ and loaded from there
+    // (see hooks/vitest.mjs for why); the helper is found through the
+    // environment so a bundling runner cannot break the path.
+    const hookDir = path.join(workDir, 'hooks');
+    fs.mkdirSync(hookDir, { recursive: true });
+    for (const file of ['vitest.mjs', 'attribution.cjs']) {
+      fs.copyFileSync(path.join(this.options.hooksDir, file), path.join(hookDir, file));
+    }
+    ctx.log(`Hook copied into ${hookDir}.`);
+    const env = { ...process.env, DEEPTEST_ATTRIBUTION_DIR: attrDir, DEEPTEST_HOOKS_DIR: hookDir, CI: process.env.CI ?? 'true', NO_COLOR: '1', FORCE_COLOR: '0' };
     const { extraArgs } = tsFields(ctx.settings);
     const sourceGlobRoot = ctx.settings.sourceRoot || '.';
     const testsPath = ctx.settings.testsPath;
@@ -398,7 +417,7 @@ export class TypeScriptCoverageSource implements CoverageSource {
     } else {
       const bin = path.join(moduleDir, 'vitest.mjs');
       const userConfig = findVitestConfig(ctx.workspaceRoot);
-      const hook = path.join(this.options.hooksDir, 'vitest.mjs');
+      const hook = path.join(hookDir, 'vitest.mjs');
       // A relative import: Vite bundles the wrapper and everything it
       // imports relatively, so a TypeScript config goes through esbuild
       // like it would on its own. A file:// URL would be left to Node

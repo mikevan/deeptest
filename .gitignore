@@ -12,3 +12,6 @@ test/fixtures/pyproject/.vscode/
 # DeepTest's working files are regenerated on every check; the decisions travel with the code.
 .deeptest/*
 !.deeptest/decisions.json
+
+# Fixture copies of the HelloWorlds ports (scripts/sync-fixtures.mjs) install their own dependencies when a test needs them.
+test/fixtures/helloworld-*/node_modules/
