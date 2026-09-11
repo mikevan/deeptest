@@ -545,3 +545,80 @@ published command, not on that behaviour.
 Not done: the refactor brief in src/report/brief.ts still exists for the
 not-installed case. The 2026-09-06 decision was to move it to UntangleIt;
 it stays here as the fallback until UntangleIt is the common case.
+
+## The run that ran nothing (0.4.5)
+
+0.3.8 caught pytest failing before collection (exit codes 2 to 5) and
+reported those runs as failed instead of scoring them. It missed the other
+shape: every test collected, every test errored at setup, exit code 1,
+"0 passed, 5 errors". Regalia without Docker running produces exactly this
+(its fixtures start PostgreSQL through Testcontainers), and 0.3.8 scored it
+as "0 passed, 5 could not run" beside a 16% coverage figure. The 16% was
+import-time execution, not tests; presenting it as coverage is a false
+reading, which is the one thing this tool must never give.
+
+The guard now lives in src/runner.ts, above the language contract, so it
+holds for every plugin: a run counts only when passed + failed > 0
+(`testsRan` in src/ui/words.ts). Errored and skipped tests executed no code
+under test. When nothing ran, the runner logs the four counts and the exit
+code, sets the error state with `nothingToScoreSentence`, and returns
+before parseStructures. The person sees "No test ran to the end, so there
+is nothing to score. 5 tests could not run, usually because of a setup
+error such as a missing fixture or a database that is not running. Press
+"Show the log" to see the test run." with "Check my code again", "Show the
+log", and "Change the setup" underneath. Pinned in test/words.test.ts.
+
+Alternatives weighed: a coverage-percentage floor (wrong: a small honest
+run can be 3%); trusting the plugin's exit code (wrong: pytest returns 1
+for both "tests failed" and "tests errored", and Jest returns 1 for both
+too); treating errors as failures (wrong: a failed test ran the code and
+its coverage is real; an errored one did not).
+
+## The install button says where (0.4.5)
+
+"This Python is missing coverage." with an "Install coverage" button was
+right but not enough: in the field the person could not tell whether the
+install would land in the project's .venv or the global Python. The
+sentence now names the interpreter (`missingPackagesSentence` in
+src/languages/python/coverage.ts): "The Python at C:\...\.venv\Scripts\
+python.exe is missing coverage." for an absolute path, "The Python found as
+"python" on your PATH is missing coverage." for a bare name, and the button
+reads "Install coverage into that Python". The command is unchanged: that
+interpreter, -m pip install. Pinned in test/python-adapter.test.ts.
+
+Bundling coverage.py inside the VSIX was considered and set aside for now:
+it must import inside the interpreter that runs the tests, its C extension
+is built per platform and per Python version, the pure-Python tracer is
+slower and drops concurrency and plugins (coverage.readthedocs.io/en/latest/
+install.html), and Apache-2.0 inside a GPL-3.0-only package adds a NOTICE
+obligation. Kept open: ship the pure-Python tracer as an offline fallback
+only, used when the project's own copy is absent and pip cannot run, with
+the report saying which copy measured.
+
+## The sanity check between ways through and tangle (0.4.5)
+
+Decision, 2026-09-12: DeepTest ranks and judges by ways through, and only
+by ways through. Density is tests against ways through per line, the
+verdict is built on it, and "Hardest to test" is literally the function
+with the most paths a test must reach. Tangle (Campbell and MBCC) rides
+beside every function as a sanity check and drives nothing here; it
+drives UntangleIt, whose question it answers. The open question from
+2026-09-09 (which number drives the list) is closed this way.
+
+The check is one sentence appended by `tangleSentence` through
+`tangleCheck` in src/ui/words.ts. Tangle above ways through means
+nesting: "It is harder to follow than it is to test, which means nesting.
+That is a job for UntangleIt." Ways through at twice the tangle or more
+means a flat dispatcher: "It is long rather than hard to follow. It needs
+tests more than it needs untangling." When the numbers agree the sentence
+says nothing extra. This is DeepTest pointing at UntangleIt's door without
+ranking by its number, per the paper on MBCC (toolkit docs) and section 6
+of it: the three numbers are collected as a check on each other, not to
+drive coverage, and when Campbell and MBCC disagree, MBCC wins.
+
+The library changed underneath at the same time (ordered branches: the
+k-th branch of a chain on different facts costs k; an exclusive chain on
+one value costs one, like a switch), so the MBCC figure on existing
+functions moves. Nothing in DeepTest's arithmetic reads it, so no
+DeepTest verdict changes; the comparison table and the tangle numbers
+behind the switch do. Rebuild the library before this tree.

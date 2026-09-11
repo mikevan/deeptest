@@ -18,6 +18,7 @@ import { runtimeEnvironment } from './languages/shared/runtime';
 import { LanguagePlugin, LanguageSettings } from './languages/types';
 import { ResultState } from './state';
 import { workspaceRootOf } from './ui/paths';
+import { nothingToScoreSentence, testsRan } from './ui/words';
 
 export interface RunnerDeps {
   extensionUri: vscode.Uri;
@@ -133,6 +134,12 @@ export async function runAnalysis(deps: RunnerDeps, folder: vscode.WorkspaceFold
   }
   if (token.isCancellationRequested) {
     state.clear();
+    return;
+  }
+  if (!testsRan(run.tests)) {
+    const why = nothingToScoreSentence(run.tests);
+    log(`Refused to score: ${run.tests.passed} passed, ${run.tests.failed} failed, ${run.tests.errors} errors, ${run.tests.skipped} skipped, exit code ${run.tests.exitCode}. ${why}`);
+    state.setError(why);
     return;
   }
 

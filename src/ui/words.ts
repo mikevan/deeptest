@@ -168,9 +168,29 @@ export const MBCC_LONG = "MikeVan's Better Cognitive Complexity";
  * operand when the order of the operands carries meaning.
  */
 export function tangleSentence(fn: FunctionComplexity): string {
-  return fn.campbell === fn.mbcc
+  const numbers = fn.campbell === fn.mbcc
     ? `Its tangle is ${fn.campbell} by Campbell and by ${MBCC}.`
     : `Its tangle is ${fn.campbell} by Campbell and ${fn.mbcc} by ${MBCC}.`;
+  const check = tangleCheck(fn);
+  return check ? `${numbers} ${check}` : numbers;
+}
+
+/**
+ * The sanity check between ways through and tangle. DeepTest ranks and
+ * judges by ways through; tangle rides beside it so the two can disagree
+ * out loud. When they do, the disagreement is the finding: tangle above
+ * ways through is a nest (short, dangerous, UntangleIt's job); ways
+ * through at twice the tangle or more is a flat dispatcher (long, not
+ * hard, needs tests more than untangling). Agreement says nothing extra.
+ */
+export function tangleCheck(fn: FunctionComplexity): string {
+  if (fn.mbcc > fn.complexity) {
+    return 'It is harder to follow than it is to test, which means nesting. That is a job for UntangleIt.';
+  }
+  if (fn.complexity >= 2 * fn.mbcc && fn.complexity > 1) {
+    return 'It is long rather than hard to follow. It needs tests more than it needs untangling.';
+  }
+  return '';
 }
 
 /** The three numbers, compact, for a list row: "30 ways through, tangle 12 / 15". */
@@ -220,6 +240,30 @@ export function summaryRows(summary: Summary, voice: Voice): SummaryRow[] {
     }
   }
   return rows;
+}
+
+/**
+ * A run counts only when at least one test reached its end, passing or
+ * failing. Tests that errored at setup (a missing fixture, a database that
+ * is not running) and tests that were skipped executed no code under test,
+ * so coverage from such a run is noise and must never be scored. 0.3.8
+ * scored "0 passed, 5 could not run" beside a 16% coverage figure; this is
+ * the language-neutral guard that stops it, above the plugin contract.
+ */
+export function testsRan(tests: TestRunSummary): boolean {
+  return tests.passed + tests.failed > 0;
+}
+
+/** Why a run with no finished test is refused, in plain words. */
+export function nothingToScoreSentence(tests: TestRunSummary): string {
+  const see = 'Press "Show the log" to see the test run.';
+  if (tests.errors > 0) {
+    return `No test ran to the end, so there is nothing to score. ${plural(tests.errors, 'test')} could not run, usually because of a setup error such as a missing fixture or a database that is not running. ${see}`;
+  }
+  if (tests.skipped > 0) {
+    return `No test ran, so there is nothing to score. ${tests.skipped === 1 ? 'The only test was' : `All ${tests.skipped} tests were`} skipped. ${see}`;
+  }
+  return `No test ran, so there is nothing to score. ${see}`;
 }
 
 export function testsSentence(tests: TestRunSummary): string {

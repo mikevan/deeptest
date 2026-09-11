@@ -1,10 +1,12 @@
 # MikeVan's AI Development Toolkit: how the tools talk to each other
 
-Draft 4, 2026-09-11 (draft 3 was 2026-09-09, draft 2 was 2026-09-06). Publisher: `prs` (Project Revive Solutions, LLC). Companion to toolkit-architecture.md. This is the contract between tools. Anything not written here is private to a tool and may change without notice.
+Draft 5, 2026-09-12 (draft 4 was 2026-09-11, draft 3 2026-09-09, draft 2 2026-09-06). Publisher: `prs` (Project Revive Solutions, LLC). Companion to toolkit-architecture.md. This is the contract between tools. Anything not written here is private to a tool and may change without notice.
 
 Draft 4 change: the untangling tool is named **UntangleIt**. The Marketplace upload under its first display name was refused by the similarity check ("refactorix already exists"), and a dormant Visual Studio extension by mynkow (last active around 2017) shares that first name on the Marketplace website. The tool was unpublished, so the rename is free: id `prs.untangleit`, commands `untangleit.*`, records `.untangleit/`, folder `C:\workspace\UntangleIt`, repo `mikevan/untangleit`. The pack folder and repo are `MADTPackage`.
 
 ## 1. The rules
+
+Which number drives what, settled 2026-09-12: DeepTest ranks and judges by ways through (cyclomatic); its `limit` is a ways-through limit. UntangleIt ranks and judges by tangle (MBCC); its `limit` is a tangle limit, default 15. Both tools carry all three numbers, and each prints the other's driver beside its own as a sanity check. The reasoning is in the MBCC paper in the toolkit docs.
 
 1. Tools talk through four channels and nothing else: discovery, commands, records on disk, and events. No shared code between tools, no imports across tools, no reaching into a sibling's storage except the files this document lists. A shared *library* is different from shared tool code: `@projectrevivesolutions/complexity` (added 2026-09-09) holds the three complexity measures and nothing else, has no verb, no screen, and no storage, and every tool that reports a complexity number builds against it so the numbers agree. It is the one library the toolkit shares; anything else a tool needs from a sibling goes through the four channels.
 2. Every channel is one way: the caller depends on the callee's published contract; the callee knows nothing about the caller. KeepSafe is the proof: it is unmodified, and DeepTest still integrates with it fully.
@@ -83,7 +85,7 @@ Callers use `keepsafe.quickCheckpoint` before a hand-off and `keepsafe.restoreLa
 |---|---|---|---|
 | `untangleit.method` | interactive | `{ path, startLine }` | The full loop on one method: show, checkpoint, confirm, transform, verify, report. What DeepTest's "Break it into smaller pieces" calls when UntangleIt is installed. |
 | `untangleit.worst` | interactive | none | The loop on the most tangled method in the workspace. |
-| `untangleit.api.measure` | silent | `{ path }` | Methods in the file with all three numbers: `{ name, startLine, endLine, cyclomatic, campbell, mbcc }`. (0.1.0 returned ways through only; from 0.2.0 all three, measured by the shared library.) |
+| `untangleit.api.measure` | silent | `{ path }` | Methods in the file with all three numbers: `{ name, startLine, endLine, cyclomatic, campbell, mbcc, waysThrough, over }`. `waysThrough` equals `cyclomatic` and stays for callers written against 0.1.x; `over` is `mbcc` above the limit (0 when within). (0.1.x returned `waysThrough` and an `over` on ways through; from 0.1.11 all three, measured by the shared library, and `over` on tangle.) The result's `limit` is the tangle limit. |
 | `untangleit.api.plan` | silent | `{ path, startLine, limit }` | What the mechanical engine would do, as a list of steps, without doing it. Lets a caller show the plan before the gates. |
 
 ## 4. Records on disk

@@ -1,8 +1,8 @@
 # MikeVan's AI Development Toolkit: common design and architecture language
 
-Draft 3, 2026-09-11 (draft 2 was 2026-09-09, draft 1 was 2026-09-06). Publisher: `prs` (Project Revive Solutions, LLC). The toolkit is MikeVan's AI Development Toolkit; the company publishes it. The words and the shape every tool in the toolkit shares, so that KeepSafe, DeepTest, UntangleIt, and whatever comes next read as one product family, integrate without knowing each other's insides, and can be reviewed against one standard. Where a tool departs from this document, the departure is written down in that tool's engineering notes with the reason.
+Draft 4, 2026-09-12 (draft 3 was 2026-09-11, draft 2 2026-09-09, draft 1 2026-09-06). Publisher: `prs` (Project Revive Solutions, LLC). The toolkit is MikeVan's AI Development Toolkit; the company publishes it. The words and the shape every tool in the toolkit shares, so that KeepSafe, DeepTest, UntangleIt, and whatever comes next read as one product family, integrate without knowing each other's insides, and can be reviewed against one standard. Where a tool departs from this document, the departure is written down in that tool's engineering notes with the reason.
 
-Draft 3 change: the untangling tool is named UntangleIt (2026-09-11). The Marketplace refused its first display name as too similar to an existing listing, and the tool was unpublished, so the name, id, commands, and storage folder all changed at once. See toolkit-api.md for the identifiers.
+Draft 4 change: which number belongs to which tool, settled 2026-09-12 (see "Ways through" and "Tangle" below, and the MBCC paper, mbcc-why-and-how.md). Draft 3 change: the untangling tool is named UntangleIt (2026-09-11). The Marketplace refused its first display name as too similar to an existing listing, and the tool was unpublished, so the name, id, commands, and storage folder all changed at once. See toolkit-api.md for the identifiers.
 
 ## 1. The thesis
 
@@ -20,8 +20,8 @@ Use these words, in this sense, in every tool's interface, documentation, and co
 - **Check**: a run of a tool over the workspace that ends in a verdict. "Check my code" is the button.
 - **Verdict**: the tool's one-sentence answer, first on the screen, always a complete sentence. "This looks ready." "This is not ready: 947 lines were never tested."
 - **Limit**: a threshold the person sets. "Your limit is 10." Never "threshold" on screen.
-- **Ways through**: cyclomatic complexity, in Jeff's words. A decision is one `if`, `else`, loop, error handler, or half of an `and`/`or`. The test bar: every way through is a path a test must reach.
-- **Tangle**: how hard a function is to follow. Two numbers, always shown together: **tangle (Campbell)**, Cognitive Complexity as SonarSource published it, and **tangle (MBCC)**, MikeVan's Better Cognitive Complexity, which charges a chain of `and`/`or` one per operand when the order of the operands carries meaning. All three numbers come from the shared library `@projectrevivesolutions/complexity`, so every tool prints the same figure for the same function.
+- **Ways through**: cyclomatic complexity, in Jeff's words. A decision is one `if`, `else`, loop, error handler, or half of an `and`/`or`. The test bar: every way through is a path a test must reach. DeepTest's number: density, the verdict, and "Hardest to test" are built on it and on nothing else. It is the only number that ever sets a test count.
+- **Tangle**: how hard a function is to follow. UntangleIt's number: its list, its judge, and its brief read it. Two figures, always shown together: **tangle (Campbell)**, Cognitive Complexity as SonarSource published it, and **tangle (MBCC)**, MikeVan's Better Cognitive Complexity, Campbell's rule with one change: where order carries meaning the reader pays per step, so a run of `and`/`or` costs one per operand when the operands depend on each other or make calls, and a chain of `if`/`elif`/`else` on different facts costs k for its k-th branch. A `switch`, or a chain on one value against constants, costs one; tangle measures depth, and splitting a flat switch into a method per case removes no depth. When Campbell and MBCC wildly disagree, MBCC wins. All three numbers come from the shared library `@projectrevivesolutions/complexity`, so every tool prints the same figure for the same function, and each tool prints the other's number beside its own as a sanity check, never as a driver.
 - **Shortfall**: one thing that falls below a limit, with a location.
 - **Card**: the on-screen unit for one shortfall: where, what, why, and the choices.
 - **Decision**: the person's recorded answer to a shortfall: Fix this, Accept as it is, or Leave for now. Pinned to the text it was made about; stale when that text changes.
@@ -93,6 +93,6 @@ Flat cut shapes on a black ground in KeepSafe's orange and green, one object per
 
 ## 11. What is open
 
-- The switch-case counting rule in DeepTest (a case as one decision versus cumulative), which also sets UntangleIt's dispatch-table transform.
+- The switch-case counting rule for ways through in DeepTest (a case as one decision versus cumulative). For tangle it is settled: a switch is one. UntangleIt's dispatch-table transform is therefore never a tangle job; it lives only in the extension-point rule of the spec.
 - Whether the "ledger" that joins checkpoints to verdicts is a fourth tool or a feature of DeepTest, given KeepSafe stays untouched.
 - Colour meanings in the editor overlays (green over, light green met, yellow short, red untested, grey unreachable) are DeepTest's today and should be the same in every tool that paints lines.

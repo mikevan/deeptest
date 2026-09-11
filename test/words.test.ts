@@ -2,7 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { scoreLine, summarize, analyzeFile } from '../src/engine/density';
 import { FileCoverage, FileStructure } from '../src/engine/types';
-import { badge, decisionSentence, findingSentence, functionFixRoute, hoverText, lineCaption, refactorChoiceDescription, summaryRows, tangleSentence, testsSentence, threeNumbers, untangleFailedSentence, untangleItSetupHint, untangleSentSentence, verdict } from '../src/ui/words';
+import { badge, decisionSentence, findingSentence, functionFixRoute, hoverText, lineCaption, nothingToScoreSentence, refactorChoiceDescription, summaryRows, tangleSentence, testsRan, testsSentence, threeNumbers, untangleFailedSentence, untangleItSetupHint, untangleSentSentence, verdict } from '../src/ui/words';
 
 const plain = { showNumbers: false };
 const numbers = { showNumbers: true };
@@ -97,7 +97,16 @@ test('summaryRows: plain values, numbers only when asked, hardest function named
   const withNumbers = summaryRows(s, numbers);
   assert.match(withNumbers[2].numbers ?? '', /cyclomatic complexity total 12/);
   assert.match(withNumbers[2].numbers ?? '', /cognitive complexity max 7 \(Campbell\), 9 \(MBCC\)/);
-  assert.equal(tangleSentence({ name: 'f', startLine: 1, endLine: 2, complexity: 3, campbell: 4, mbcc: 4 }), 'Its tangle is 4 by Campbell and by MBCC.');
+  assert.equal(tangleSentence({ name: 'f', startLine: 1, endLine: 2, complexity: 5, campbell: 4, mbcc: 4 }), 'Its tangle is 4 by Campbell and by MBCC.');
+  // The sanity check: tangle above ways through is a nest; ways through at twice the tangle is a flat dispatcher.
+  assert.equal(
+    tangleSentence({ name: 'f', startLine: 1, endLine: 2, complexity: 3, campbell: 4, mbcc: 4 }),
+    'Its tangle is 4 by Campbell and by MBCC. It is harder to follow than it is to test, which means nesting. That is a job for UntangleIt.',
+  );
+  assert.equal(
+    tangleSentence({ name: 'dispatch', startLine: 1, endLine: 2, complexity: 29, campbell: 1, mbcc: 1 }),
+    'Its tangle is 1 by Campbell and by MBCC. It is long rather than hard to follow. It needs tests more than it needs untangling.',
+  );
   assert.equal(threeNumbers({ name: 'f', startLine: 1, endLine: 2, complexity: 3, campbell: 4, mbcc: 4 }), '3 ways through, tangle 4');
   assert.equal(threeNumbers({ name: 'f', startLine: 1, endLine: 2, complexity: 3, campbell: 4, mbcc: 6 }), '3 ways through, tangle 4 / 6');
   const fine = summarize([analyzeFile(cov('a.py', { 1: ['t'] }), struct('a.py', { 1: 1 }, [{ name: 'f', startLine: 1, endLine: 2, complexity: 2, campbell: 0, mbcc: 0 }]))]);
@@ -138,4 +147,35 @@ test('UntangleIt words: complete sentences, exact control labels, the sibling na
   assert.equal(untangleItSetupHint(true), 'UntangleIt is installed. "Break it into smaller pieces" hands the function to it, and it asks before anything changes.');
   assert.ok(untangleItSetupHint(false).startsWith('"Break it into smaller pieces" asks your AI assistant'));
   assert.ok(untangleItSetupHint(false).endsWith('It is not installed.'));
+});
+
+test('testsRan: a run counts only when a test passed or failed', () => {
+  assert.equal(testsRan({ passed: 1, failed: 0, errors: 0, skipped: 0, exitCode: 0 }), true);
+  assert.equal(testsRan({ passed: 0, failed: 2, errors: 0, skipped: 0, exitCode: 1 }), true);
+  assert.equal(testsRan({ passed: 0, failed: 0, errors: 5, skipped: 0, exitCode: 1 }), false);
+  assert.equal(testsRan({ passed: 0, failed: 0, errors: 0, skipped: 3, exitCode: 0 }), false);
+  assert.equal(testsRan({ passed: 0, failed: 0, errors: 0, skipped: 0, exitCode: 0 }), false);
+});
+
+test('nothingToScoreSentence says why the run was refused, in plain words', () => {
+  assert.equal(
+    nothingToScoreSentence({ passed: 0, failed: 0, errors: 5, skipped: 0, exitCode: 1 }),
+    'No test ran to the end, so there is nothing to score. 5 tests could not run, usually because of a setup error such as a missing fixture or a database that is not running. Press "Show the log" to see the test run.',
+  );
+  assert.equal(
+    nothingToScoreSentence({ passed: 0, failed: 0, errors: 1, skipped: 0, exitCode: 1 }),
+    'No test ran to the end, so there is nothing to score. 1 test could not run, usually because of a setup error such as a missing fixture or a database that is not running. Press "Show the log" to see the test run.',
+  );
+  assert.equal(
+    nothingToScoreSentence({ passed: 0, failed: 0, errors: 0, skipped: 3, exitCode: 0 }),
+    'No test ran, so there is nothing to score. All 3 tests were skipped. Press "Show the log" to see the test run.',
+  );
+  assert.equal(
+    nothingToScoreSentence({ passed: 0, failed: 0, errors: 0, skipped: 1, exitCode: 0 }),
+    'No test ran, so there is nothing to score. The only test was skipped. Press "Show the log" to see the test run.',
+  );
+  assert.equal(
+    nothingToScoreSentence({ passed: 0, failed: 0, errors: 0, skipped: 0, exitCode: 0 }),
+    'No test ran, so there is nothing to score. Press "Show the log" to see the test run.',
+  );
 });
