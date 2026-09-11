@@ -1,6 +1,6 @@
 # DeepTest: build status and run instructions
 
-Updated 2026-09-12 (0.4.5, uncommitted). Companion to vscode-density-extension-spec.md.
+Updated 2026-09-12 (1.0.0). Companion to vscode-density-extension-spec.md.
 Source tree and VSIX live at C:\workspace\DeepTest on Michael's machine. The
 authoritative copy of this file is docs/build-status.md in that tree.
 Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
@@ -9,11 +9,13 @@ Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
 commits (icon, README, packaging rules), then "Break it into smaller pieces
 hands off to UntangleIt" (0.4.4, 2026-09-12, pushed).
 
-Version policy (2026-09-12): patch numbers only until the core processes
-are buttoned up; the minor number moves when they are. So 0.4.5 here,
-0.1.11 for UntangleIt, 0.1.1 for the complexity library.
+Version policy (2026-09-12, later the same day): the core is declared done
+and every extension is tagged 1.0.0 together (DeepTest, UntangleIt, the
+pack, and the library). From here the minor number moves once per language
+across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
+numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
 
-## 2026-09-12, second build: three changes in the tree, not yet run on Michael's machine (0.4.5)
+## 2026-09-12, second build: three changes in the tree (built as 0.4.5, shipped as 1.0.0)
 
 - src/runner.ts refuses to score when passed + failed is 0 (errored and
   skipped tests executed nothing); `testsRan` and `nothingToScoreSentence`

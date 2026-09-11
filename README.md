@@ -106,6 +106,8 @@ The three complexity numbers come from the shared library `@projectrevivesolutio
 | Python | pytest | coverage.py dynamic contexts, one run | tree-sitter-python |
 | TypeScript / JavaScript | Jest or Vitest | Istanbul counters snapshotted around every test by a setup hook, one run | tree-sitter typescript, tsx, javascript |
 
+Next, one minor number per language across the whole toolkit: Java (1.1), C# (1.2), C++ (1.3), then Go or PHP (1.4). JavaScript frameworks that allow testing (React, Vue, Angular, and their runners) are runner work inside the existing plugin and ship as patches. The plan and what each language must have before it ships are in docs/toolkit/toolkit-roadmap.md.
+
 One contract, every language: the engine, overlay, panel, report, and setup screen know no language. Java, C#, C++, and one of PHP or Go are next.
 
 ---
