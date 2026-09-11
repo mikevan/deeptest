@@ -239,24 +239,46 @@ test('.vue and .svelte files are walked as sources and are in the plugin\'s exte
   assert.equal(guessLanguage(HW('svelte-vitest'))?.language, 'typescript');
 });
 
-test('a single-file component yields an empty structure in 1.0.2, so its untested lines show red at bar 1 rather than vanishing', async () => {
+test('a single-file component is parsed through its script block on its real lines; the template is declarations (1.0.3)', async () => {
   const structureSource = await typescriptPlugin.createStructureSource({ wasmDir: runtimeEnvironment().wasmDir });
-  const rel = 'src/components/GreetingPicker.vue';
-  const text = fs.readFileSync(path.join(HW('vue-vitest'), rel), 'utf8');
-  const structure = structureSource.analyze(rel, text, DEFAULT_DEPTH_OPTIONS);
-  structureSource.dispose();
-  assert.equal(structure.path, rel);
-  assert.equal(structure.functions.length, 0);
-  assert.equal(structure.depth.size, 0);
-  // Coverage the way Istanbul reports it for the component: executable lines, none under any test.
-  const lines = new Map<number, Set<string>>([[14, new Set()], [15, new Set()], [16, new Set()]]);
-  const result = analyze([{ path: rel, lines, executed: new Set<number>() }], [structure]);
-  const file = result.files[0];
-  assert.equal(file.lines.length, 3);
-  for (const l of file.lines) {
-    assert.equal(l.status, 'untested');
-    assert.equal(l.bar, 1);
+  try {
+    const vueRel = 'src/components/GreetingPicker.vue';
+    const vue = structureSource.analyze(vueRel, fs.readFileSync(path.join(HW('vue-vitest'), vueRel), 'utf8'), DEFAULT_DEPTH_OPTIONS);
+    const villain = vue.functions.find((f) => f.name === 'pickGreeting');
+    assert.ok(villain, 'the villain is found inside the .vue file');
+    assert.equal(villain.startLine, 13, 'the line in the editor');
+    assert.deepEqual([villain.complexity, villain.campbell, villain.mbcc], [27, 73, 97], 'the same villain as every other port');
+    assert.equal(vue.depth.get(37), 6);
+    assert.deepEqual(vue.routes.get(37)?.map((s) => `${s.condition} ${s.outcome}`), [
+      "lang === 'en' is true", 'hour < 12 is false', 'hour < 18 is true', 'formal is true', "mood === 'great' is false", "mood === 'bad' is true",
+    ]);
+    assert.ok(vue.declarations.has(1), 'the <script> tag line is a declaration');
+    assert.ok(vue.declarations.has(109), 'a template line is a declaration');
+    assert.equal(vue.depth.has(109), false);
+
+    const svelteRel = 'src/lib/GreetingPicker.svelte';
+    const svelte = structureSource.analyze(svelteRel, fs.readFileSync(path.join(HW('svelte-vitest'), svelteRel), 'utf8'), DEFAULT_DEPTH_OPTIONS);
+    const sv = svelte.functions.find((f) => f.name === 'pickGreeting');
+    assert.ok(sv);
+    assert.equal(sv.startLine, 11);
+    assert.deepEqual([sv.complexity, sv.campbell, sv.mbcc], [27, 73, 97]);
+    assert.ok(svelte.declarations.has(96), 'a <script> tag line is a declaration');
+    assert.ok(svelte.declarations.has(101), 'a template line after the last </script> is a declaration');
+
+    // A template-only component: no functions, every line a declaration.
+    const plain = structureSource.analyze('src/Plain.vue', '<template>\n  <p>hi</p>\n</template>\n', DEFAULT_DEPTH_OPTIONS);
+    assert.equal(plain.functions.length, 0);
+    assert.deepEqual(Array.from(plain.declarations).sort((a, b) => a - b), [1, 2, 3, 4]);
+
+    // Through the engine: a template line the runner reports is a declaration (counted for coverage, not density);
+    // a script line deep in the villain is untested at the bar its depth sets.
+    const lines = new Map<number, Set<string>>([[37, new Set()], [109, new Set()]]);
+    const result = analyze([{ path: vueRel, lines, executed: new Set<number>() }], [vue]);
+    const byLine = new Map(result.files[0].lines.map((l) => [l.line, l]));
+    assert.equal(byLine.get(37)?.status, 'untested');
+    assert.equal(byLine.get(37)?.bar, 6);
+    assert.equal(byLine.get(109)?.status, 'declaration');
+  } finally {
+    structureSource.dispose();
   }
-  assert.equal(result.shortfalls.length, 3);
-  assert.equal(result.shortfalls[0].path, rel);
 });

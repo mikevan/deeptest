@@ -1,6 +1,6 @@
 # DeepTest: build status and run instructions
 
-Updated 2026-09-12 (1.0.2, in the tree). Companion to vscode-density-extension-spec.md.
+Updated 2026-09-12 (1.0.3, in the tree). Companion to vscode-density-extension-spec.md.
 Source tree and VSIX live at C:\workspace\DeepTest on Michael's machine. The
 authoritative copy of this file is docs/build-status.md in that tree.
 Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
@@ -14,6 +14,24 @@ and every extension is tagged 1.0.0 together (DeepTest, UntangleIt, the
 pack, and the library). From here the minor number moves once per language
 across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
 numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
+
+## 2026-09-12, 1.0.3: single-file components are parsed
+
+- The library's extractScript blanks everything outside a .vue or
+  .svelte file's script blocks, newlines kept, so the parsed tree's rows
+  are the editor's lines. DeepTest's structure source parses components
+  through it; lines outside the blocks are declarations (counted for
+  coverage, never for density). The template is not parsed.
+- UntangleIt measures components the same way and walks .vue and .svelte.
+- Tests: 7 new in the library (40), 1 replaced in DeepTest (191), 1 new in
+  UntangleIt (14).
+- Verify on HelloWorlds\vue-vitest in VS Code: "Check my code" puts
+  pickGreeting() at the top of "Hardest to test" with 27 ways through,
+  "Open" lands on line 13 of src/components/GreetingPicker.vue, and the
+  first card under "Look at these first" is line 37 of that file with a
+  six-step route. Then "Break it into smaller pieces" hands it to
+  UntangleIt, whose list shows pickGreeting() from the .vue file first.
+  The same on HelloWorlds\svelte-vitest, line 11 of src/lib/GreetingPicker.svelte.
 
 ## 2026-09-12, 1.0.2: the framework is known; .vue and .svelte are visible
 

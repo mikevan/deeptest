@@ -13,6 +13,7 @@ import { CoverageSource, Detection, FieldSpec, HostServices, LanguagePlugin, Str
 import { TypeScriptCoverageSource, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, readPackageJson, resolveModuleDir, walkSources } from './coverage';
 import { analyzeTypeScriptTree } from './structure';
 import { detectFramework, frameworkSentence } from './framework';
+import { extractScript, isSingleFileComponent } from '@projectrevivesolutions/complexity';
 
 const FIELDS: FieldSpec[] = [
   {
@@ -75,16 +76,33 @@ class TypeScriptStructureSource implements StructureSource {
 
   analyze(relativePath: string, text: string, options: DepthOptions): FileStructure {
     const ext = path.extname(relativePath).toLowerCase();
-    if (ext === '.vue' || ext === '.svelte') {
-      // A single-file component's script block is parsed from 1.0.3. Until
-      // then the file has no known structure: every executable line the
-      // runner reports carries depth 0, so it scores as never tested (red)
-      // or tested, and never disappears from the report (1.0 survey,
-      // finding 2). No function is reported, so the villain inside it is
-      // not yet ranked; that is 1.0.3's job.
-      return { path: relativePath, depth: new Map(), routes: new Map(), functions: [], unreachable: new Set(), declarations: new Set() };
+    if (isSingleFileComponent(relativePath)) {
+      // A single-file component is parsed through its script blocks. The
+      // library blanks everything outside them, character for character,
+      // so the tree's rows are the editor's lines. Lines outside the
+      // blocks (template, style, the tags themselves) are declarations:
+      // they count for coverage when the runner reports them and are
+      // never scored for density, because the template's decisions are
+      // not parsed yet (1.0.3; see the engineering notes).
+      const script = extractScript(text);
+      if (!script) {
+        const declarations = new Set<number>();
+        for (let l = 1; l <= text.split('\n').length; l += 1) {
+          declarations.add(l);
+        }
+        return { path: relativePath, depth: new Map(), routes: new Map(), functions: [], unreachable: new Set(), declarations };
+      }
+      const structure = this.parse(relativePath, script.source, script.lang === 'tsx' ? this.parsers.tsx : script.lang === 'typescript' ? this.parsers.typescript : this.parsers.javascript, options);
+      for (const l of script.outside) {
+        structure.declarations.add(l);
+        structure.depth.delete(l);
+      }
+      return structure;
     }
-    const parser = ext === '.tsx' ? this.parsers.tsx : ext === '.ts' || ext === '.mts' || ext === '.cts' ? this.parsers.typescript : this.parsers.javascript;
+    return this.parse(relativePath, text, ext === '.tsx' ? this.parsers.tsx : ext === '.ts' || ext === '.mts' || ext === '.cts' ? this.parsers.typescript : this.parsers.javascript, options);
+  }
+
+  private parse(relativePath: string, text: string, parser: Parser, options: DepthOptions): FileStructure {
     const tree = parser.parse(text);
     if (!tree) {
       throw new Error(`tree-sitter could not parse ${relativePath}`);

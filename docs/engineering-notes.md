@@ -831,3 +831,59 @@ helloworld-* fixtures: detection per port, the sentences, the notes order,
 the Angular refusal without a fix for both runners, the walker and the
 language guess on `.vue` and `.svelte`, and an SFC scored through the
 engine at bar 1 with every line untested. 191 unit tests expected.
+
+## Single-file components are parsed (1.0.3)
+
+Phase 2 of the 1.0 plan. A `.vue` or `.svelte` file carries its logic in
+one or more `<script>` blocks; the template around them is HTML with its
+own control flow.
+
+The parse. The library gained `extractScript` (src/sfc.ts) and
+`isSingleFileComponent`. It does not extract the block: it returns the
+whole file with every character outside the script blocks replaced by a
+space, newlines kept. The text is the same length, the same line count,
+and the same columns, so the tree-sitter rows are the editor's line
+numbers with no offset table to maintain, and a route, a depth, a
+function's start line, an Istanbul line, and UntangleIt's read-and-rewrite
+of a method all name the same line without translation. Every block is
+kept (Vue's `<script>` beside `<script setup>`, Svelte's `<script module>`
+beside `<script>`), each a module-level run of statements that a grammar
+parses one after the other. The grammar is chosen from the `lang`
+attributes: tsx if any block says so, TypeScript if any says `ts`, else
+JavaScript. The alternative, cutting the block out and adding the start
+line back to every number afterwards, was rejected: it is one more place
+for an off-by-one to live, and there are five consumers of those numbers.
+
+What the rest of the file is. Every line outside the blocks goes into the
+structure's `declarations` set and out of `depth`. The engine then counts
+such a line for coverage when the runner reports it (Istanbul does report
+template lines, mapped back through the Vite plugin's source map) and
+never scores it for density. The template's `v-if` and `{#if}` are
+decisions a reader has to understand, and they wait for a later slot; a
+component whose only logic is in its template scores every reported line
+as a declaration, which is honest about what the tool has read.
+
+What it shows on the fixtures. vue-vitest: `pickGreeting` in
+GreetingPicker.vue at 27/73/97 starting on line 13, the same villain as
+every other port, at the top of "Hardest to test"; line 37 at depth 6
+with the six-step route, untested; coverage unchanged at 27.27%, density
+pass rate 23.75%. svelte-vitest: the same at line 11. The module-level
+`$props()` and `$derived()` calls in the Svelte instance block, and
+`defineComponent` in Vue, are plain statements at nesting zero and add
+nothing to any function's numbers, so the compiler-macro concern in the
+plan did not arise on these fixtures.
+
+UntangleIt in the same delivery: its structure source measures a
+component through the same extraction, `.vue` and `.svelte` join its
+walker, its extensions, and its language guess, and the untangle loop
+reads and rewrites the method's real lines. New fixture
+test/fixtures/sfc with a Vue, a Svelte, and a template-only component;
+`classify` measures 5/5/7 in both at its editor line.
+
+Tests: seven in the library (test/sfc.test.ts: line numbers, both blocks,
+the grammar choice, CRLF, content on the tag line, a `<script>` inside a
+string, and no block at all; 40 in the library now); the DeepTest test
+from 1.0.2 is replaced by one that finds the villain in both fixtures
+with its numbers, depth, route, and declaration lines, and pushes a
+template line and a deep script line through the engine (191 unit tests,
+the count unchanged); one in UntangleIt (14).
