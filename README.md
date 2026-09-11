@@ -1,15 +1,75 @@
 # DeepTest
 
-The DeepTest engine inside a VS Code extension built for people who do not read code:
-it checks an AI's work and says, in plain words, what is not done.
+"Coverage tells you a line ran. DeepTest tells you whether it was tested."
 
-Coverage tells you a line ran. It does not tell you the line ran under enough
-tests to matter. A failure path buried under five nested conditions that one
-happy-path test happens to brush past is "covered." It is not tested. An AI
-that ran out of context halfway through a feature leaves exactly that kind of
-hole, and the person who ships it is the one who pays for it.
+![DeepTest in action: check, read the verdict, decide](media/deeptest.gif)
 
-DeepTest scores every executable line against the decisions that guard it:
+DeepTest checks an AI's work and says, in plain words, what is not done. It runs your own tests, then scores every line against the decisions that guard it: a failure path buried under five nested conditions needs five tests, not one happy-path test that happens to brush past it. The verdict comes first, in one sentence. You decide what to do about it.
+
+### Why DeepTest
+
+- **Density, not coverage**: Every line is scored against the number of decisions on the way to it, so a "covered" line that one test skims is reported as short.
+- **Plain words first**: "This is not ready: 945 lines were never tested." The engineer's numbers sit behind one switch.
+- **Routes, not guesses**: For every untested line, the chain of decisions on the way to it and exactly where your tests stop.
+- **You decide, always**: Fix this, Accept as it is, or Leave for now. DeepTest never edits code and never accepts a fix on your behalf.
+- **Your own runner**: pytest, Jest, or Vitest, the one your project already has. DeepTest ships no runtime.
+- **100% local**: Results and decisions stay in `.deeptest/` in your workspace. No model, no key, no network.
+
+### DeepTest + KeepSafe: Partners in Protection
+
+"KeepSafe remembers where you were. DeepTest tells you whether you should go back."
+
+Before DeepTest hands a fix to your AI assistant, it offers a KeepSafe checkpoint. After the assistant is done, DeepTest measures again. If the line is still short, the report says so, and the checkpoint is your way back.
+
+### Workflow
+
+**Check → Read the verdict → Fix, Accept, or Leave → Check again**
+
+### Quick Start
+
+1. Install DeepTest from the VS Code Marketplace.
+2. Open the DeepTest panel and select Check my code. The setup screen opens once, already filled in; select Save and run tests.
+3. Read the verdict. On each card, select Fix this, Accept as it is, or Open.
+4. Select Check my code again after your assistant's work.
+
+![DeepTest: the verdict, in plain words, first](media/panel.png)
+
+---
+
+## Features
+
+**The verdict first**: One sentence at the top of the panel, then what the tests say against your limits, then the worst lines as cards.
+
+**Per-line overlay**: Every open file shows each line's state in the gutter: green over the bar, light green met, yellow short, red untested, grey unreachable. The glyphs differ in shape, so it reads without colour. Hover for the tests that reached the line and how far along the route they got.
+
+**Routes**: For every shortfall, the decisions that must go a particular way to reach the line, outermost first, with a tick or a cross on each for whether any test got past it.
+
+**Three numbers per function**: Ways through (cyclomatic complexity), tangle by Campbell's Cognitive Complexity, and tangle by MikeVan's Better Cognitive Complexity (MBCC). Ways through drives the "Hardest to test" verdict; the two tangle numbers sit beside it, and the full report compares all three side by side.
+
+**Fix this**: The one place DeepTest hands work to an AI, so it asks first. A KeepSafe checkpoint is offered, then a confirmation that names the line and says what will happen. The brief carries the line, its bar, the route, where tests stop, and nearby tests to copy in style. It goes to the editor's chat and to the clipboard.
+
+**Fix this on a function**: Two honest answers to a function with too many ways through it: break it into smaller pieces without changing what it does, or leave it and test every way through. You choose. When RefactorIt is installed, "Break it into smaller pieces" hands the job to it.
+
+**Accept as it is**: Records why a line may stay below its bar, with your name and the date, in `.deeptest/decisions.json` beside the code. Pinned to the text of the line; change the line and the decision says it no longer applies.
+
+**Full report**: The five worst lines in full, the rest one row each, accepted lines with their reasons, unreachable code, the functions over your limit, and a "Ways through against tangle" table. Save as Markdown to send on.
+
+**Honest failures**: A test run that fails before any test ran is reported as exactly that, with the runner's own words. DeepTest never scores a run in which no test ran.
+
+### Commands
+
+| Command | Function |
+|---------|----------|
+| **Check my code** | Run the tests and show the verdict |
+| **Tell me where the tests are** | Open the setup screen |
+| **Full report** | Open the full report |
+| **Show what is happening** | Open the log |
+| **Colour the lines in my files on or off** | Toggle the overlay |
+| **Show the numbers (for engineers) on or off** | Show the engineer's numbers beside the plain words |
+
+---
+
+## How a Line Is Scored
 
 ```
 density(line) = distinct tests that executed the line
@@ -17,102 +77,6 @@ depth(line)   = decisions that must go a particular way to reach the line,
                 plus decisions evaluated on the line itself
 bar(line)     = max(depth, 1)
 ```
-
-| Overlay | Meaning |
-|---|---|
-| Green, double check | Over the bar. More tests than decisions. |
-| Light green, check | Met the bar exactly. |
-| Yellow, triangle | Short. Some tests, not enough. |
-| Red, cross | Untested. No test reached it. |
-| Grey, dash | Unreachable. Delete it, do not test around it. |
-
-The gutter glyphs differ in shape, so the overlay reads without colour.
-
-## One button
-
-Open the DeepTest view in the activity bar and press run. The first time,
-a configuration screen opens with everything already filled in: the language
-found in the workspace, the tests folder, the code under test, the test
-runner from `package.json` or the interpreter the Python extension has
-selected. For most projects the right move is to press "Save and run tests"
-without touching a field. If a tool is missing (`coverage`, `pytest`,
-`@vitest/coverage-istanbul`), DeepTest names it and offers to install it.
-
-Every value it saves is an ordinary `deeptest.*` workspace setting.
-
-## What you see
-
-The side panel opens with the verdict in one line: "This is not ready: 4 lines were never tested." Under it, one button, three lines on what the tests say, and the worst lines as cards with Fix this, Accept as it is, and Open. No engineer's word appears anywhere unless you tick "Show the engineer's numbers next to the plain words."
-
-## What you get
-
-- A **per-line overlay** in every open file: tint, glyph, and `tests/bar` at
-  the end of the line. Hover for the tests that reached it and how far the
-  tests get along the route to it. The overlay follows your edits and flags
-  the file as changed until the next run.
-- A **sidebar** with the summary against your thresholds (line coverage,
-  density pass rate, average density, cyclomatic complexity), the ranked
-  shortfalls worst first, lines a person accepted, functions over the
-  complexity limit, and unreachable code.
-- A **report** for someone who does not read code. The five worst lines get
-  the full story: the chain of decisions on the way to the line, where the
-  existing tests stop, what the line does, and what to do. Everything else
-  gets one row. Save it as Markdown to send on.
-- **Decisions**, yours. On every shortfall: Fix this, Accept as it is, or
-  Leave for now. Nothing happens without a person choosing it.
-
-## The human rule
-
-The tool finds and explains. The person who is accountable decides. Once
-they decide, the assistant they choose does the work, and DeepTest judges
-the result.
-
-**Fix this** is the one place DeepTest hands work to an AI, so it asks
-first. If the [KeepSafe](https://marketplace.visualstudio.com/items?itemName=KeepSafe.keepsafe)
-extension is installed, DeepTest offers to create a KeepSafe checkpoint,
-which is the undo button for everything the assistant is about to change.
-Then a confirmation names the line and says what will happen; nothing is
-sent until you press "Yes, send it". The brief itself carries the exact
-line, the bar, the decisions on the route, where tests stop, and nearby
-tests to copy in style; it goes to the editor's chat if there is one and to
-the clipboard regardless. DeepTest carries no model and no key. If KeepSafe
-is not installed, the setup screen recommends it and DeepTest says nothing
-more about it. After the next run the line is green,
-or the report says "fix attempted, still short by N" and it is your call
-again. No retry on the tool's initiative.
-
-**Fix this on a function** sits on the "Hardest to test" row and beside
-every function in the report that is over your limit. There are two honest
-answers to a function with too many ways through it, and you choose: break
-it into smaller pieces that each fit under the limit without changing what
-it does, or leave it alone and test every way through it. Either way the
-same checkpoint offer and confirmation apply, the brief goes to your
-assistant, and the next check measures the function again and says whether
-it is within your limit now.
-
-**Accept** records why the line may stay below its bar, with your name and
-the date, in `.deeptest/decisions.json` next to the code. It leaves the
-ranked list and sits in its own section with the reason beside it. A
-decision is pinned to the text of the line; change the line and the
-decision no longer applies, and says so.
-
-## Languages
-
-One contract, every language. The engine, overlay, sidebar, report, and
-configuration screen know no language. A plugin supplies detection,
-per-test coverage, structure (routes, depth, complexity, unreachable code),
-and its own small block of configuration fields.
-
-| Plugin | Runner | Per-test attribution | Structure |
-|---|---|---|---|
-| Python | pytest | coverage.py dynamic contexts, one run | tree-sitter-python |
-| TypeScript / JavaScript | Jest or Vitest | Istanbul counters snapshotted around every test by a setup hook, one run | tree-sitter typescript, tsx, javascript |
-
-Adding a language is a folder under `src/languages/` and one line in the
-registry. If it needs an edit anywhere else, that is a bug in the contract.
-Java, C#, C++, and one of PHP or Go are next.
-
-## Depth rules
 
 | Construct | Depth of the line and its body |
 |---|---|
@@ -127,22 +91,34 @@ Java, C#, C++, and one of PHP or Go are next.
 | `x if c else y`, `c ? x : y` | +1 |
 | comprehension `for` / `if` clause (Python) | +1 each |
 
-Depth restarts at 0 inside every function. Module-level statements, `def`,
-`class`, and method headers, decorators, and field initialisers run at
-import time, not under a test; they count for coverage and are excluded
-from density. Every rule after the first is a checkbox.
+Depth restarts at 0 inside every function. Module-level statements, `def`, `class`, and method headers, decorators, and field initialisers run at import time, not under a test; they count for coverage and are excluded from density. Every rule after the first is a checkbox in the settings.
 
-"Worst" is the gap: complexity minus tests, largest first, then the deeper
-bar. That one definition drives the sidebar, the status bar, and the report.
+"Worst" is the gap: bar minus tests, largest first, then the deeper bar. That one definition drives the panel, the status bar, and the report.
+
+The three complexity numbers come from the shared library `@projectrevivesolutions/complexity`, the same one RefactorIt measures with, so the two tools never disagree about a function. The rules are in that package's `docs/measures.md`.
+
+---
+
+## Languages
+
+| Plugin | Runner | Per-test attribution | Structure |
+|---|---|---|---|
+| Python | pytest | coverage.py dynamic contexts, one run | tree-sitter-python |
+| TypeScript / JavaScript | Jest or Vitest | Istanbul counters snapshotted around every test by a setup hook, one run | tree-sitter typescript, tsx, javascript |
+
+One contract, every language: the engine, overlay, panel, report, and setup screen know no language. Java, C#, C++, and one of PHP or Go are next.
+
+---
 
 ## Requirements
 
-- VS Code 1.104 or newer.
-- Python projects: the Python the project already uses (the one the Python extension selected, else the project's own `.venv`, else `python` on PATH) with `coverage` and `pytest` installed in it. DeepTest never brings a Python of its own.
-- TypeScript / JavaScript projects: Node on PATH and Jest or Vitest in the
-  project. Vitest also needs `@vitest/coverage-istanbul`.
+- Visual Studio Code 1.104.0 or newer.
+- Python projects: the Python the project already uses (the one the Python extension selected, else the project's own `.venv`, else `python` on PATH) with `coverage` and `pytest` installed in it.
+- TypeScript / JavaScript projects: Node on PATH and Jest or Vitest in the project. Vitest also needs `@vitest/coverage-istanbul`; DeepTest offers the install.
 
-Nothing else. No native modules, no extra extensions.
+Nothing else. No native modules, no extra extensions. If a project's `pytest.ini` turns on pytest-cov, DeepTest runs pytest without those options for its check and leaves the file alone.
+
+---
 
 ## Settings
 
@@ -153,53 +129,46 @@ All under `deeptest.`:
 | `language` | detected | plugin id: `python`, `typescript` |
 | `testsPath` | detected | tests folder, relative to the workspace |
 | `sourceRoot` | detected | code under test; empty means the whole workspace minus tests |
-| `languageSettings` | `{}` | per-plugin fields, edited by the configuration screen |
+| `languageSettings` | `{}` | per-plugin fields, edited by the setup screen |
 | `thresholds.minCoverage` | 80 | percent |
 | `thresholds.minDensityPassRate` | 90 | percent of scored lines at or over their bar |
 | `thresholds.minAverageDensity` | 1.0 | mean of tests/bar |
-| `thresholds.maxFunctionComplexity` | 10 | per function |
+| `thresholds.maxFunctionComplexity` | 10 | ways through, per function |
 | `report.detailedRoutes` | 5 | how many shortfalls the report explains in full |
 | `depth.*` | all on | the counting rules above |
 | `overlay.enabled`, `overlay.showInlineNumbers` | on | |
+| `keepSafe.offerCheckpoint` | on | offer a checkpoint before every hand-off |
+| `showNumbers` | off | the engineer's numbers beside the plain words |
 | `colors.*` | | background tints per state |
+
+---
+
+## Known Limits
+
+- pytest parametrized cases share one function name under coverage.py's `test_function` context, so `test_x[1]` and `test_x[2]` count as one test.
+- Line coverage is what the summary reports. coverage.py's own percentage blends in branch coverage and reads lower.
+- The density numerator is distinct test cases, not distinct assertions.
+- Recursion is found by name within one file; cross-file recursion does not add to the tangle.
+
+---
 
 ## Developing
 
 ```
-npm install
-npm test            # engine, parsers, adapters, decisions, report (Vitest; the Python case needs python3 with coverage and pytest)
+cd ..\complexity && npm install      # the shared scorer, built once
+cd ..\DeepTest && npm install
+npm test            # engine, parsers, adapters, decisions, report (Vitest; the Python cases need python3 with coverage and pytest)
 npm run build       # bundle to dist/, copy wasm grammars and runner hooks
 npm run test:vscode # launches VS Code against both fixture projects and drives the extension
+npx @vscode/vsce package --no-dependencies
 ```
 
-To try a build in VS Code itself: `npx @vscode/vsce package --no-dependencies`,
-then in the Extensions view choose "Install from VSIX..." from the "..." menu,
-pick the file, and click "Restart Extensions" when offered.
+Then in the Extensions view choose "Install from VSIX..." from the "..." menu, pick the file, and reload the window. The panel header carries the build number.
 
-DeepTest measures itself: point it at this repository with language
-`typescript`, tests folder `test`, source root `src`. The engine, parsers,
-and report sit at their bar; the editor-facing files only run inside the
-integration suite, which Istanbul does not see, so they show red. That is
-the truth and the tool is not going to soften it for its own author.
+DeepTest measures itself: point it at this repository with language `typescript`, tests folder `test`, source root `src`. The editor-facing files only run inside the integration suite, which Istanbul does not see, so they show red. That is the truth and the tool is not going to soften it for its own author.
 
-Every run writes `.deeptest/` into the workspace under test (runner
-output, generated config, attribution, and `decisions.json`). Commit
-`decisions.json`; ignore the rest.
+Design and contracts: `docs/toolkit/`. Engineering reasons: `docs/engineering-notes.md`. Acceptance script: `docs/uat.md`.
 
-## Known limits
+---
 
-- pytest parametrized cases share one function name under coverage.py's
-  `test_function` context, so `test_x[1]` and `test_x[2]` count as one test.
-  pytest-cov's `--cov-context=test` records node ids instead; the parser
-  already accepts that format, the runner does not yet request it.
-- Line coverage is what the summary reports. coverage.py's own percentage
-  blends in branch coverage and reads lower.
-- The density numerator is distinct test cases, not distinct assertions.
-- Jest runs get `--setupFilesAfterEnv` with the project's own list plus the
-  hook; Vitest runs use a generated config that wraps the project's. A
-  project whose config is a function of the environment is called with
-  `mode: 'test'`.
-
-## License
-
-DeepTest is free software under the GNU General Public License, version 3.0 only. See the LICENSE file.
+**License:** GPL-3.0-only. Part of MikeVan's AI Development Toolkit, published by Project Revive Solutions, LLC, https://projectrevivesolutions.com.

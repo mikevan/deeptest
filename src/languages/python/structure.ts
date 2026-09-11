@@ -76,7 +76,7 @@ class Analyzer {
   /**
    * Fills in all three numbers once the whole file is known (recursion
    * cycles need every function). The measures come from
-   * @projectrevivesolutions/complexity, the one scorer every PRS tool uses.
+   * @projectrevivesolutions/complexity, the one scorer every tool in MikeVan's AI Development Toolkit uses.
    */
   measure(): void {
     measurePython(this.functionNodes).forEach((m, i) => {

@@ -1,0 +1,2 @@
+Drop the Marketplace GIF here as media/deeptest.gif (referenced at the top of README.md, right under the tagline).
+Delete this file when the GIF is in place.

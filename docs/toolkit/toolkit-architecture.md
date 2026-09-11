@@ -1,6 +1,6 @@
-# PRS AI development toolkit: common design and architecture language
+# MikeVan's AI Development Toolkit: common design and architecture language
 
-Draft 1, 2026-09-06. Publisher: `prs` (Project Revive Solutions, LLC). The words and the shape every tool in the toolkit shares, so that KeepSafe, DeepTest, Refactor It, and whatever comes next read as one product family, integrate without knowing each other's insides, and can be reviewed against one standard. Where a tool departs from this document, the departure is written down in that tool's engineering notes with the reason.
+Draft 2, 2026-09-09 (draft 1 was 2026-09-06). Publisher: `prs` (Project Revive Solutions, LLC). The toolkit is MikeVan's AI Development Toolkit; the company publishes it. The words and the shape every tool in the toolkit shares, so that KeepSafe, DeepTest, RefactorIt, and whatever comes next read as one product family, integrate without knowing each other's insides, and can be reviewed against one standard. Where a tool departs from this document, the departure is written down in that tool's engineering notes with the reason.
 
 ## 1. The thesis
 
@@ -14,11 +14,12 @@ Jeff: an accountant in his mid-40s with a CPA, never wrote code beyond Excel mac
 
 Use these words, in this sense, in every tool's interface, documentation, and code.
 
-- **Verb**: the one thing a tool does. KeepSafe remembers and restores. DeepTest measures and judges. Refactor It untangles. A tool with two verbs is two tools.
+- **Verb**: the one thing a tool does. KeepSafe remembers and restores. DeepTest measures and judges. RefactorIt untangles. A tool with two verbs is two tools.
 - **Check**: a run of a tool over the workspace that ends in a verdict. "Check my code" is the button.
 - **Verdict**: the tool's one-sentence answer, first on the screen, always a complete sentence. "This looks ready." "This is not ready: 947 lines were never tested."
 - **Limit**: a threshold the person sets. "Your limit is 10." Never "threshold" on screen.
-- **Ways through**: cyclomatic complexity, in Jeff's words. A decision is one `if`, `else`, loop, error handler, or half of an `and`/`or`.
+- **Ways through**: cyclomatic complexity, in Jeff's words. A decision is one `if`, `else`, loop, error handler, or half of an `and`/`or`. The test bar: every way through is a path a test must reach.
+- **Tangle**: how hard a function is to follow. Two numbers, always shown together: **tangle (Campbell)**, Cognitive Complexity as SonarSource published it, and **tangle (MBCC)**, MikeVan's Better Cognitive Complexity, which charges a chain of `and`/`or` one per operand when the order of the operands carries meaning. All three numbers come from the shared library `@projectrevivesolutions/complexity`, so every tool prints the same figure for the same function.
 - **Shortfall**: one thing that falls below a limit, with a location.
 - **Card**: the on-screen unit for one shortfall: where, what, why, and the choices.
 - **Decision**: the person's recorded answer to a shortfall: Fix this, Accept as it is, or Leave for now. Pinned to the text it was made about; stale when that text changes.
@@ -34,14 +35,14 @@ Use these words, in this sense, in every tool's interface, documentation, and co
 
 Michael's scale, applied to every part of every tool: **method call**, **atom**, **AI-based agent**, **skill**. An atom must leverage AI; that is the qualifying test. Prefer the AI-driven option where it fits; use a method call where a proof or a measurement is available and an AI adds nothing. Each tool's engineering notes list its components on this scale.
 
-Applied so far: DeepTest's engine, parsers, and coverage adapters are method calls (measurement, provable). Its Fix hand-off is an AI-based agent seam: the tool builds the brief, the person's assistant is the agent, the tool judges. KeepSafe is method calls throughout. Refactor It's mechanical engine is method calls; its AI engine is an agent behind the same interface.
+Applied so far: DeepTest's engine, parsers, and coverage adapters are method calls (measurement, provable). Its Fix hand-off is an AI-based agent seam: the tool builds the brief, the person's assistant is the agent, the tool judges. KeepSafe is method calls throughout. RefactorIt's mechanical engine is method calls; its AI engine is an agent behind the same interface.
 
 ## 5. Principles
 
 1. **The human decides.** Not because humans are superior but because they are accountable. Tools report and offer; the person chooses; then the AI goes ham; then the tool judges.
 2. **One verb per tool.** When a feature needs a second verb, it is a new tool.
 3. **Judge, never vouch.** A tool never accepts an AI's result, never retries on its own, and is never responsible for the quality of the assistant the person chose.
-4. **Integrate one way, through public commands.** No shared code, no imports across tools, no modification of a sibling to suit another. A tool checks whether a sibling is installed, uses its published command if so, and otherwise recommends it once, in the text of its setup screen, with a link, and never mentions it anywhere else.
+4. **Integrate one way, through public commands.** No shared tool code, no imports across tools, no modification of a sibling to suit another. The one shared *library* is `@projectrevivesolutions/complexity`: measures only, no verb, no screen, no storage. A tool checks whether a sibling is installed, uses its published command if so, and otherwise recommends it once, in the text of its setup screen, with a link, and never mentions it anywhere else.
 5. **Use the project's own runtime.** A tool never ships a language runtime or a test runner. It finds the project's Python, Node, Java, and test runner the way the project itself does.
 6. **Plain words first, complete sentences, exact labels.** Every user-facing string ends with punctuation. Every instruction names the control as it is labelled on screen. A tool that is sloppy about words cannot be trusted about code.
 7. **No barriers.** Plain TypeScript, no native modules, nothing extra to install, fields pre-filled from detection so the correct action on the setup screen is to press the button.
@@ -85,6 +86,6 @@ Source at `C:\workspace\<Tool>`, updated in place. Every delivery: version bumpe
 
 ## 10. What is open
 
-- The switch-case counting rule in DeepTest (a case as one decision versus cumulative), which also sets Refactor It's dispatch-table transform.
+- The switch-case counting rule in DeepTest (a case as one decision versus cumulative), which also sets RefactorIt's dispatch-table transform.
 - Whether the "ledger" that joins checkpoints to verdicts is a fourth tool or a feature of DeepTest, given KeepSafe stays untouched.
-- A shared visual identity: icon family, colour meanings (green over, light green met, yellow short, red untested, grey unreachable), and the toolkit name on each Marketplace page.
+- A shared visual identity: icon family, colour meanings (green over, light green met, yellow short, red untested, grey unreachable), and "MikeVan's AI Development Toolkit" on each Marketplace page.
