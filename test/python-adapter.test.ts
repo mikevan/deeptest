@@ -3,17 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {
-  PythonCoverageSource,
-  guessTestsPath,
-  isTestFile,
-  normalizeContext,
-  parseCoverageJson,
-  parsePytestSummary,
-  interpreterFromProject,
-  pythonFields,
-  walkPython,
-} from '../src/languages/python/coverage';
+import { PythonCoverageSource, guessTestsPath, isTestFile, normalizeContext, parseCoverageJson, parsePytestSummary, interpreterFromProject, pythonFields, walkPython, missingPackagesSentence } from '../src/languages/python/coverage';
 import { pythonPlugin } from '../src/languages/python';
 import { countLanguages, guessLanguage } from '../src/detect/language';
 import { analyze } from '../src/engine/density';
@@ -305,4 +295,11 @@ test.skipIf(!hasPython)('end to end: a pytest usage error is reported as a faile
     source.run({ workspaceRoot: dir, settings: settings('tests', 'src'), log: () => undefined }),
     (err: Error) => /failed before any test ran, because pytest did not accept its command line/.test(err.message) && /--definitely-not-an-option/.test(err.message),
   );
+});
+
+test('missingPackagesSentence names the interpreter the packages are missing from', () => {
+  const venv = process.platform === 'win32' ? 'C:\\work\\app\\.venv\\Scripts\\python.exe' : '/work/app/.venv/bin/python';
+  assert.equal(missingPackagesSentence(venv, ['coverage']), `The Python at ${venv} is missing coverage.`);
+  assert.equal(missingPackagesSentence(venv, ['coverage', 'pytest']), `The Python at ${venv} is missing coverage and pytest.`);
+  assert.equal(missingPackagesSentence('python', ['coverage']), 'The Python found as "python" on your PATH is missing coverage.');
 });

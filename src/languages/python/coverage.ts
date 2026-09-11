@@ -54,6 +54,20 @@ export function interpreterFromProject(workspaceRoot: string): string | undefine
   return undefined;
 }
 
+/**
+ * Names the interpreter the packages are missing from, so a person can tell
+ * a project's .venv from the global Python before pressing the install
+ * button. "This Python is missing coverage." left that ambiguous in the
+ * field (2026-09-12): the install goes wherever DeepTest pointed, and the
+ * sentence did not say where that was.
+ */
+export function missingPackagesSentence(interpreter: string, missing: string[]): string {
+  const what = missing.join(' and ');
+  return path.isAbsolute(interpreter)
+    ? `The Python at ${interpreter} is missing ${what}.`
+    : `The Python found as "${interpreter}" on your PATH is missing ${what}.`;
+}
+
 export function splitArgs(text: string): string[] {
   return text.trim() ? text.trim().split(/\s+/) : [];
 }
@@ -373,9 +387,9 @@ export class PythonCoverageSource implements CoverageSource {
     return {
       ok: false,
       summary,
-      problems: [`This Python is missing ${missing.join(' and ')}.`],
+      problems: [missingPackagesSentence(interpreter, missing)],
       fix: {
-        title: `Install ${missing.join(' and ')}`,
+        title: `Install ${missing.join(' and ')} into that Python`,
         command: interpreter,
         args: ['-m', 'pip', 'install', ...missing],
       },
