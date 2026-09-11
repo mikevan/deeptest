@@ -5,6 +5,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, coverageIstanbulSpec } from '../src/languages/typescript/coverage';
 import { typescriptPlugin } from '../src/languages/typescript';
+import { detectAngularRunner, detectFramework, frameworkSentence } from '../src/languages/typescript/framework';
+import { guessLanguage } from '../src/detect/language';
 import { analyze } from '../src/engine/density';
 import { DEFAULT_DEPTH_OPTIONS } from '../src/engine/types';
 import { runtimeEnvironment } from '../src/languages/shared/runtime';
@@ -173,4 +175,88 @@ test('the coverage package install is pinned to the project\'s Vitest major', ()
   assert.equal(coverageIstanbulSpec('4.1.11'), '@vitest/coverage-istanbul@4');
   assert.equal(coverageIstanbulSpec('3.2.7'), '@vitest/coverage-istanbul@3');
   assert.equal(coverageIstanbulSpec(''), '@vitest/coverage-istanbul');
+});
+
+// ---- 1.0.2: the framework is known; single-file components are visible ----
+
+const HW = (port: string) => path.join(process.cwd(), 'test', 'fixtures', `helloworld-${port}`);
+
+test('detectFramework reads package.json and, for Angular, the runner under the ng test builder', () => {
+  assert.deepEqual(detectFramework(HW('react-vitest')), { name: 'React', major: '19', configFile: 'vite.config.ts' });
+  assert.equal(detectFramework(HW('react-jest'))?.name, 'React');
+  assert.deepEqual(detectFramework(HW('vue-vitest')), { name: 'Vue', major: '3', configFile: 'vite.config.ts' });
+  assert.deepEqual(detectFramework(HW('svelte-vitest')), { name: 'Svelte', major: '5', configFile: 'svelte.config.js' });
+  assert.equal(detectFramework(HW('angular-vitest'))?.angularRunner, 'vitest');
+  assert.equal(detectFramework(HW('angular-karma'))?.angularRunner, 'karma');
+  assert.equal(detectAngularRunner(HW('angular-karma')), 'karma');
+  assert.equal(detectAngularRunner(JEST_FIXTURE), undefined);
+  assert.equal(detectFramework(JEST_FIXTURE), undefined, 'a plain project has no framework');
+});
+
+test('frameworkSentence names the framework, its major, and the runner', () => {
+  assert.equal(frameworkSentence({ name: 'Vue', major: '3' }, 'vitest'), 'Vue 3 with Vitest.');
+  assert.equal(frameworkSentence({ name: 'React', major: '19' }, 'jest'), 'React 19 with Jest.');
+  assert.equal(frameworkSentence({ name: 'React' }, undefined), 'React.');
+  assert.equal(frameworkSentence({ name: 'Angular', major: '22', angularRunner: 'karma' }, undefined), 'Angular 22, tests through ng test with Karma.');
+  assert.equal(frameworkSentence({ name: 'Angular', major: '22', angularRunner: 'vitest' }, undefined), 'Angular 22, tests through ng test with Vitest.');
+});
+
+test('plugin detect puts the framework first in the notes, and says ng test for Angular', async () => {
+  const ctx = { activeLanguageId: undefined, extensionApi: async () => undefined };
+  const vue = await typescriptPlugin.detect(HW('vue-vitest'), ctx);
+  assert.equal(vue.notes[0], 'Framework: Vue 3 with Vitest.');
+  assert.match(vue.notes[1], /Found vitest/);
+  const karma = await typescriptPlugin.detect(HW('angular-karma'), ctx);
+  assert.equal(karma.notes[0], 'Framework: Angular 22, tests through ng test with Karma.');
+  assert.match(karma.notes[1], /ng test/);
+  assert.equal(karma.notes.some((n) => /Install/.test(n)), false, 'no install advice on an Angular project');
+  const plain = await typescriptPlugin.detect(JEST_FIXTURE, ctx);
+  assert.equal(plain.notes.some((n) => /^Framework:/.test(n)), false);
+});
+
+test('checkEnvironment on an Angular project refuses to run and offers no install (Karma and Vitest alike)', async () => {
+  const source = new TypeScriptCoverageSource({ hooksDir: runtimeEnvironment().hooksDir });
+  for (const [port, runner] of [['angular-karma', 'Karma'], ['angular-vitest', 'Vitest']] as const) {
+    const env = await source.checkEnvironment({ workspaceRoot: HW(port), settings: settings('src'), log: () => undefined });
+    assert.equal(env.ok, false);
+    assert.equal(env.summary, `Angular, ng test with ${runner}`);
+    assert.equal(env.fix, undefined, `no fix offered on ${port}`);
+    assert.match(env.problems[0], new RegExp(`"ng test" with ${runner}`));
+    assert.match(env.problems[0], /Nothing needs installing\./);
+    assert.doesNotMatch(env.problems.join(' '), /Install Vitest|Install Jest/);
+  }
+});
+
+test('.vue and .svelte files are walked as sources and are in the plugin\'s extensions', () => {
+  const vue = walkSources(HW('vue-vitest'));
+  assert.ok(vue.includes('src/components/GreetingPicker.vue'), vue.join(', '));
+  assert.ok(vue.includes('src/greet.ts'));
+  const svelte = walkSources(HW('svelte-vitest'));
+  assert.ok(svelte.includes('src/lib/GreetingPicker.svelte'), svelte.join(', '));
+  assert.ok(typescriptPlugin.extensions.includes('.vue'));
+  assert.ok(typescriptPlugin.extensions.includes('.svelte'));
+  assert.equal(guessLanguage(HW('vue-vitest'))?.language, 'typescript');
+  assert.equal(guessLanguage(HW('svelte-vitest'))?.language, 'typescript');
+});
+
+test('a single-file component yields an empty structure in 1.0.2, so its untested lines show red at bar 1 rather than vanishing', async () => {
+  const structureSource = await typescriptPlugin.createStructureSource({ wasmDir: runtimeEnvironment().wasmDir });
+  const rel = 'src/components/GreetingPicker.vue';
+  const text = fs.readFileSync(path.join(HW('vue-vitest'), rel), 'utf8');
+  const structure = structureSource.analyze(rel, text, DEFAULT_DEPTH_OPTIONS);
+  structureSource.dispose();
+  assert.equal(structure.path, rel);
+  assert.equal(structure.functions.length, 0);
+  assert.equal(structure.depth.size, 0);
+  // Coverage the way Istanbul reports it for the component: executable lines, none under any test.
+  const lines = new Map<number, Set<string>>([[14, new Set()], [15, new Set()], [16, new Set()]]);
+  const result = analyze([{ path: rel, lines, executed: new Set<number>() }], [structure]);
+  const file = result.files[0];
+  assert.equal(file.lines.length, 3);
+  for (const l of file.lines) {
+    assert.equal(l.status, 'untested');
+    assert.equal(l.bar, 1);
+  }
+  assert.equal(result.shortfalls.length, 3);
+  assert.equal(result.shortfalls[0].path, rel);
 });

@@ -771,3 +771,63 @@ run from a temporary folder outside the repository (the shape the suite
 had never exercised, which is why the bug lived through 0.2 to 1.0), and
 the pin. tsconfig now excludes test/fixtures, since the HelloWorld copies
 carry framework sources the extension's compiler must not see.
+
+## The framework is known, and single-file components turn red (1.0.2)
+
+Findings 2 and 4 of the 1.0 survey, fixed. Nothing here parses a
+component or drives a new runner; those are 1.0.3 and 1.0.4.
+
+Detection. `src/languages/typescript/framework.ts` reads package.json
+(`@angular/core`, `svelte`, `vue`, `react`, in that order, since a Vue or
+Svelte project can carry React as a transitive-looking dev dependency but
+not the other way round) and the config file beside it, and for Angular
+reads angular.json to find the runner under the `@angular/build:unit-test`
+builder (`"runner": "karma"` or nothing, which means Vitest; the old
+`@angular-devkit/build-angular:karma` builder is Karma). The setup screen's
+first note is now "Framework: Vue 3 with Vitest." or "Framework: Angular
+22, tests through ng test with Karma."; a plain project gets no framework
+line. The major comes from the dependency range, so it is the version the
+project asked for, not the one installed.
+
+The Karma advice. `checkEnvironment` looks at the framework before it
+looks for a runner. An Angular project with a runner under the builder is
+refused in one sentence, "This is an Angular project whose tests run
+through "ng test" with Karma. DeepTest cannot drive Angular's test builder
+yet; that is coming in a 1.0 update. Nothing needs installing.", with no
+fix button, because the only fix on offer would have been "Install
+Vitest" into a project that must not have it run directly (finding 3a:
+the vitest binary bypasses the Angular compiler and TestBed). The Vitest
+flavour gets the same refusal, so nobody is offered a run that produces
+a broken result.
+
+Visibility. `.vue` and `.svelte` join the source extensions in three
+places: `SOURCE_EXT` in the walker, `SOURCE_GLOB_EXTENSIONS` in the
+Vitest wrapper's coverage include and the Jest `collectCoverageFrom`
+default, and the plugin's `extensions` list (with `src/detect/language.ts`
+counting them as TypeScript). The structure source returns an empty
+structure for them: no functions, no depth, no routes. The engine then
+scores every executable line the coverage tool reports at the floor bar
+of 1, so an untested component is a block of red lines in "Look at these
+first" instead of a file that does not exist. Istanbul, through the Vite
+plugins, maps the instrumented output back to the component's own line
+numbers (GreetingPicker.vue: 52 executable lines starting at line 14, the
+first `if`, none under any test), so the red lines land on the right
+lines in the editor, and 1.0.3 only has to supply the parse.
+
+What changes on the fixtures: vue-vitest goes from 60.71% coverage and
+nothing to look at, to 27.27% with GreetingPicker.vue's 52 lines at the
+top of the list; svelte-vitest the same at 26.44%. The villain is still
+not named (no functions in an empty structure), so "Hardest to test" says
+nothing until 1.0.3. react-vitest and react-jest are unchanged at 11
+passed and pickGreeting 27/73/97. angular-vitest and angular-karma now
+refuse politely instead of failing or advising an install.
+
+UntangleIt is untouched by 1.0.2: it ranks functions, an empty structure
+has none, and the parser it shares with DeepTest did not change. It gets
+the SFC script-block parser in 1.0.3 in the same delivery as DeepTest.
+
+Six new tests in test/typescript-adapter.test.ts, all against the
+helloworld-* fixtures: detection per port, the sentences, the notes order,
+the Angular refusal without a fix for both runners, the walker and the
+language guess on `.vue` and `.svelte`, and an SFC scored through the
+engine at bar 1 with every line untested. 191 unit tests expected.

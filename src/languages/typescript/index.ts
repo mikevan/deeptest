@@ -12,6 +12,7 @@ import { createParser, initTreeSitter } from '../shared/treeSitter';
 import { CoverageSource, Detection, FieldSpec, HostServices, LanguagePlugin, StructureEnvironment, StructureSource } from '../types';
 import { TypeScriptCoverageSource, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, readPackageJson, resolveModuleDir, walkSources } from './coverage';
 import { analyzeTypeScriptTree } from './structure';
+import { detectFramework, frameworkSentence } from './framework';
 
 const FIELDS: FieldSpec[] = [
   {
@@ -38,8 +39,14 @@ async function detect(workspaceRoot: string, _host: HostServices): Promise<Detec
   const notes: string[] = [];
   const pkg = readPackageJson(workspaceRoot);
   const runner = detectRunner(workspaceRoot);
+  const framework = pkg ? detectFramework(workspaceRoot) : undefined;
+  if (framework) {
+    notes.push(`Framework: ${frameworkSentence(framework, runner)}`);
+  }
   if (!pkg) {
     notes.push('No package.json at the workspace root.');
+  } else if (framework?.name === 'Angular' && framework.angularRunner) {
+    notes.push('Angular runs its tests through "ng test". DeepTest cannot drive that builder yet; it is coming in a 1.0 update. Nothing needs installing.');
   } else if (runner) {
     const cfg =
       runner === 'vitest'
@@ -68,6 +75,15 @@ class TypeScriptStructureSource implements StructureSource {
 
   analyze(relativePath: string, text: string, options: DepthOptions): FileStructure {
     const ext = path.extname(relativePath).toLowerCase();
+    if (ext === '.vue' || ext === '.svelte') {
+      // A single-file component's script block is parsed from 1.0.3. Until
+      // then the file has no known structure: every executable line the
+      // runner reports carries depth 0, so it scores as never tested (red)
+      // or tested, and never disappears from the report (1.0 survey,
+      // finding 2). No function is reported, so the villain inside it is
+      // not yet ranked; that is 1.0.3's job.
+      return { path: relativePath, depth: new Map(), routes: new Map(), functions: [], unreachable: new Set(), declarations: new Set() };
+    }
     const parser = ext === '.tsx' ? this.parsers.tsx : ext === '.ts' || ext === '.mts' || ext === '.cts' ? this.parsers.typescript : this.parsers.javascript;
     const tree = parser.parse(text);
     if (!tree) {
@@ -91,7 +107,7 @@ export const typescriptPlugin: LanguagePlugin = {
   id: 'typescript',
   displayName: 'TypeScript / JavaScript',
   vscodeLanguageIds: ['typescript', 'typescriptreact', 'javascript', 'javascriptreact'],
-  extensions: ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'],
+  extensions: ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte'],
   configFields: FIELDS,
   isTestFile,
   detect,

@@ -1,6 +1,6 @@
 # DeepTest: build status and run instructions
 
-Updated 2026-09-12 (1.0.1, in the tree). Companion to vscode-density-extension-spec.md.
+Updated 2026-09-12 (1.0.2, in the tree). Companion to vscode-density-extension-spec.md.
 Source tree and VSIX live at C:\workspace\DeepTest on Michael's machine. The
 authoritative copy of this file is docs/build-status.md in that tree.
 Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
@@ -15,6 +15,26 @@ pack, and the library). From here the minor number moves once per language
 across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
 numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
 
+## 2026-09-12, 1.0.2: the framework is known; .vue and .svelte are visible
+
+- src/languages/typescript/framework.ts (new): detectFramework,
+  detectAngularRunner, frameworkSentence. The setup screen's first note
+  names the framework and runner ("Framework: Vue 3 with Vitest.").
+- checkEnvironment refuses an Angular project (Karma or Vitest under the
+  ng test builder) in one sentence with no install button. Closes survey
+  finding 4 ("Install Vitest" on a Karma project).
+- .vue and .svelte are walked, instrumented, and scored at bar 1 with an
+  empty structure, so an untested component shows red instead of
+  vanishing. Closes survey finding 2. Parsing them is 1.0.3.
+- Six new tests against test/fixtures/helloworld-*. 191 unit tests
+  expected. UntangleIt unchanged in this delivery.
+- Verify on HelloWorlds\vue-vitest opened in VS Code: the setup screen
+  says "Framework: Vue 3 with Vitest."; "Check my code" lists
+  src/components/GreetingPicker.vue under "Look at these first" (line 14
+  first, never tested), where 1.0.1 showed nothing at all. On
+  HelloWorlds\angular-karma the setup screen names Karma and there is no
+  "Install Vitest" button.
+
 ## 2026-09-12, 1.0.1: the first slot of the Language Expansion series begins
 
 - HelloWorlds (github.com/mikevan/HelloWorlds): seven ports of the same
@@ -27,7 +47,7 @@ numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
 - 1.0.1 fixes the two production bugs: the Vitest hook is copied into
   .deeptest/hooks and loaded from there, and the coverage-package install
   is pinned to the Vitest major. Two new tests (one end to end from a
-  temporary folder). 187 unit tests expected.
+  temporary folder). 185 unit tests expected.
 - Verify on HelloWorlds\react-vitest opened in VS Code: "Check my code"
   reports 11 tests passed and pickGreeting() first; before 1.0.1 it said
   "vitest produced no coverage".

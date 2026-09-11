@@ -14,6 +14,8 @@ const EXTENSIONS: Record<string, string> = {
   '.tsx': 'typescriptreact',
   '.js': 'javascript',
   '.jsx': 'javascriptreact',
+  '.vue': 'typescript',
+  '.svelte': 'typescript',
   '.cpp': 'cpp',
   '.cc': 'cpp',
   '.cxx': 'cpp',
