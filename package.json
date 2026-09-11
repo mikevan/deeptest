@@ -3,7 +3,7 @@
   "displayName": "DeepTest",
   "description": "Checks an AI's work. Runs your tests, then shows, in plain words, which lines of code no test ever reached and how many tests each line needs. You decide what to do about it.",
   "icon": "media/deeptestLogo.png",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "publisher": "prs",
   "license": "GPL-3.0-only",
   "repository": {
@@ -28,7 +28,7 @@
       "activitybar": [
         {
           "id": "deeptest",
-          "title": "DeepTest 1.0.3",
+          "title": "DeepTest 1.0.4",
           "icon": "media/deeptest.svg"
         }
       ]
@@ -38,9 +38,9 @@
         {
           "type": "webview",
           "id": "deeptest.sidebar",
-          "name": "DeepTest 1.0.3",
+          "name": "DeepTest 1.0.4",
           "icon": "media/deeptest.svg",
-          "contextualTitle": "DeepTest 1.0.3"
+          "contextualTitle": "DeepTest 1.0.4"
         }
       ]
     },

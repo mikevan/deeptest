@@ -102,3 +102,30 @@ export function frameworkSentence(framework: Framework, runner: string | undefin
   }
   return runner ? `${name} with ${runner === 'jest' ? 'Jest' : 'Vitest'}.` : `${name}.`;
 }
+
+/**
+ * The Vitest config the builder would load for `ng test`: the test
+ * target's `runnerConfig` when it names a file, or the default
+ * vitest-base.config.* beside angular.json when it is true or absent and
+ * one exists. Undefined when the builder would run with no external
+ * config, which is the common case.
+ */
+export function detectAngularRunnerConfig(workspaceRoot: string): string | undefined {
+  const angular = readJson(path.join(workspaceRoot, 'angular.json'));
+  const projects = angular?.projects as Record<string, { architect?: Record<string, { builder?: string; options?: { runnerConfig?: string | boolean } }> }> | undefined;
+  let setting: string | boolean | undefined;
+  for (const project of Object.values(projects ?? {})) {
+    const test = project.architect?.test;
+    if (test?.builder === '@angular/build:unit-test') {
+      setting = test.options?.runnerConfig;
+      break;
+    }
+  }
+  if (typeof setting === 'string') {
+    return fs.existsSync(path.join(workspaceRoot, setting)) ? setting : undefined;
+  }
+  if (setting === false) {
+    return undefined;
+  }
+  return ['vitest-base.config.ts', 'vitest-base.config.mts', 'vitest-base.config.js', 'vitest-base.config.mjs'].find((f) => fs.existsSync(path.join(workspaceRoot, f)));
+}

@@ -46,8 +46,13 @@ async function detect(workspaceRoot: string, _host: HostServices): Promise<Detec
   }
   if (!pkg) {
     notes.push('No package.json at the workspace root.');
-  } else if (framework?.name === 'Angular' && framework.angularRunner) {
-    notes.push('Angular runs its tests through "ng test". DeepTest cannot drive that builder yet; it is coming in a 1.0 update. Nothing needs installing.');
+  } else if (framework?.name === 'Angular' && framework.angularRunner === 'karma') {
+    notes.push('Angular runs its tests through "ng test" with Karma. DeepTest cannot drive Karma yet; it is coming in a 1.0 update. Nothing needs installing.');
+  } else if (framework?.name === 'Angular' && framework.angularRunner === 'vitest') {
+    notes.push('Angular runs its tests through "ng test". DeepTest drives that builder with the hook as a setup file.');
+    if (!resolveModuleDir(workspaceRoot, '@vitest/coverage-istanbul')) {
+      notes.push('@vitest/coverage-istanbul is not installed yet; DeepTest will offer to install it on the first run.');
+    }
   } else if (runner) {
     const cfg =
       runner === 'vitest'

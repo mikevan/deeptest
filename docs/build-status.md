@@ -1,6 +1,6 @@
 # DeepTest: build status and run instructions
 
-Updated 2026-09-12 (1.0.3, in the tree). Companion to vscode-density-extension-spec.md.
+Updated 2026-09-12 (1.0.4, in the tree). Companion to vscode-density-extension-spec.md.
 Source tree and VSIX live at C:\workspace\DeepTest on Michael's machine. The
 authoritative copy of this file is docs/build-status.md in that tree.
 Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
@@ -14,6 +14,23 @@ and every extension is tagged 1.0.0 together (DeepTest, UntangleIt, the
 pack, and the library). From here the minor number moves once per language
 across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
 numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
+
+## 2026-09-12, 1.0.4: Angular with Vitest runs through the builder
+
+- Runner ng-vitest: `ng test --watch=false --isolate --coverage ...` with
+  the hook as a project-relative setup file and a generated runner config
+  that pins the istanbul provider and the reports directory.
+- The hook maps a bundled chunk's counters back to the source file
+  through the chunk's source map (hooks/attribution.cjs,
+  originalPosition). --isolate is required: without it only the first
+  spec file is attributed.
+- UntangleIt runs Angular tests through ng test too.
+- Tests: 193 in DeepTest (two new, one rewritten), 15 in UntangleIt.
+- Verify on HelloWorlds\angular-vitest in VS Code: the setup screen says
+  "Framework: Angular 22, tests through ng test with Vitest."; "Check my
+  code" reports 11 tests passed and pickGreeting() first with 27 ways
+  through; src/app/greet.ts line 4 shows 6 tests. Before 1.0.4 the run
+  was refused.
 
 ## 2026-09-12, 1.0.3: single-file components are parsed
 

@@ -887,3 +887,77 @@ from 1.0.2 is replaced by one that finds the villain in both fixtures
 with its numbers, depth, route, and declaration lines, and pushes a
 template line and a deep script line through the engine (191 unit tests,
 the count unchanged); one in UntangleIt (14).
+
+## Angular with Vitest, through the builder (1.0.4)
+
+Finding 3 of the 1.0 survey, closed for the Vitest flavour. Karma is
+1.0.5.
+
+The driver. `runnerFor` asks the framework before it asks package.json:
+an Angular project whose angular.json test target uses
+`@angular/build:unit-test` with no `"runner": "karma"` is `ng-vitest`,
+and the run is `ng test` through node_modules/@angular/cli/bin/ng.js with
+`--watch=false --isolate --coverage --coverage-reporters json
+--coverage-include <sourceRoot>/**/*.{...} --coverage-exclude` (one flag
+per pattern, see below) `--setup-files .deeptest/hooks/vitest.mjs
+--runner-config .deeptest/vitest.config.mjs`. The setup file is a
+project-relative path because the builder bundles setup files and
+appends an absolute one to the project root (finding 3c). The generated
+runner config wraps the file the builder would have loaded (the target's
+`runnerConfig`, or vitest-base.config.* beside angular.json; usually
+nothing) and pins two things: `coverage.provider: 'istanbul'`, because the
+builder picks v8 whenever v8 is installed alongside istanbul or alone,
+and v8 keeps no live counters for the hook to snapshot; and
+`coverage.reportsDirectory` under .deeptest/, so the report lands where
+the driver reads it instead of coverage/<project>/. Both are honoured:
+`determineCoverageProvider` and `reportsDirectory` in
+@angular/build/src/builders/unit-test/runners/vitest/plugins.js read the
+runner config first. The environment check for this runner wants the
+CLI, Vitest, and @vitest/coverage-istanbul pinned to the Vitest major,
+and offers npm install or the pinned package in that order.
+
+The source-map answer. The builder instruments its own esbuild chunks,
+which exist nowhere on disk (`<root>/chunk-G3X6D2YX.js`,
+`<root>/spec-app-greeting.js`), so the live counters the hook snapshots
+are keyed by chunk. Each chunk's coverage entry carries `inputSourceMap`
+whose `sources` are project-relative files (`src/app/greet.ts`) and the
+builder's own glue (`virtual:builder`), and each mapping segment names
+its source index. So the hook now keeps the source index when it decodes
+the mappings, and `originalPosition` returns the file with the line: when
+the coverage key is not a file on disk, the statement belongs to
+`sources[index]` resolved against the chunk's folder (the project root),
+and a segment that points at a virtual module is nobody's line and is
+dropped. When the key is on disk (Vite's own transform, Jest) the key
+stands and only the line moves, which is the behaviour every existing
+run depends on. `existsSync` is cached per path; the hook is inside the
+test worker and must stay cheap. The alternative, reading the per-test
+attribution from a coverage dump the provider had already mapped, was
+rejected: the provider maps once at the end of the run, and there is no
+per-test dump to read.
+
+Isolation, the finding that was not in the survey. With the hook in
+place the first run attributed one test of eleven. The builder defaults
+`isolate` to false "to align with the Karma/Jasmine experience" (`ng test
+--help`), and under Vitest with isolation off the setup file runs once
+per worker, so the `beforeEach`/`afterEach` it registers attach to the
+first spec file collected and to nothing after it; greeting.spec.ts (one
+test) got the hook, greet.spec.ts (eight) and names.spec.ts (two) did
+not. With `--isolate` every spec file gets the setup file and all eleven
+tests are attributed. The cost on the fixture is about a second and a
+half of environment setup per run. Correctness wins.
+
+Array options. `--coverage-exclude a b c` fails the whole command with
+"Unknown arguments: watch, isolate, ..., c": the CLI's yargs array
+options swallow every following word, then reject the command. One flag
+per value.
+
+Verified on angular-vitest with the plugin compiled from this tree: 11
+passed, attribution on 21 lines, `pickGreeting` (schedule.service.ts)
+first at 27/73/97, coverage 25.61%; greet.ts and names.ts carry exactly
+the per-line test counts the React ports do (`4(6) 5(1) 7(6) ...`). Every
+other port unchanged. UntangleIt runs an Angular project's tests through
+`ng test --watch=false` in the same delivery, so the loop's test gate
+holds on Angular. Tests: two new in DeepTest (the runner config
+detection; the hook mapping a chunk's counters back to a source file,
+and leaving an on-disk key alone) and the Angular environment test
+rewritten for the two flavours, 193 in all; one new in UntangleIt (15).

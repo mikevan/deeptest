@@ -95,7 +95,7 @@ Verify: a person with any of the six fixture shapes can install the pack, open t
 ## What is uncertain, said now rather than found later
 
 - Playwright component tests: per-test counters in a browser page are unverified. 1.0 may ship with Playwright detected and explained rather than driven.
-- Angular's builder: whether a setup file can be injected is the survey's job; if not, attribution on Angular Vitest projects is per file until the builder allows more, and the report says so.
+- Angular's builder: whether a setup file can be injected is the survey's job; if not, attribution on Angular Vitest projects is per file until the builder allows more, and the report says so. Answered in 1.0.4: `--setup-files` takes the hook, the hook maps the builder's chunks back to sources through their source maps, and `--isolate` is required for the hook to see every spec file. Attribution is per test, the same as everywhere else.
 - Karma: the hook is new code and the Angular Karma fixture is the only proof. Existing Angular projects are the population that needs it most, so it is worth the work, but it is the riskiest driver.
 - SFC templates: not parsed in 1.0. Decisions in templates are invisible to density until a later slot.
 - Svelte 5 runes and Vue `<script setup>` macros (`defineProps`, `$state`) are compiler-time constructs that look like calls. The library's ordered-operand rule treats calls as impure, so a guard like `props.user && props.user.name` scores the same as anywhere else, but a run containing `$derived(...)` will be charged as ordered. The survey records whether that distorts any fixture number; if it does, the library gains a per-language list of pure macros.

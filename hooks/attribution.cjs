@@ -76,7 +76,7 @@ function decodeVlq(segment) {
   return out;
 }
 
-/** Returns, per generated line (0-based), a sorted list of [genCol, origLine] pairs. */
+/** Returns, per generated line (0-based), a sorted list of [genCol, origLine, sourceIndex] triples. */
 function decodeMappings(mappings) {
   const lines = [];
   let srcIdx = 0;
@@ -96,7 +96,7 @@ function decodeMappings(mappings) {
           srcIdx += fields[1];
           origLine += fields[2];
           origCol += fields[3];
-          segments.push([genCol, origLine]);
+          segments.push([genCol, origLine, srcIdx]);
         }
       }
     }
@@ -106,12 +106,54 @@ function decodeMappings(mappings) {
 }
 
 const decodedMaps = new Map();
+const existsCache = new Map();
 
-/** Original 1-based line for a generated 1-based line / 0-based column, or the generated line when there is no map. */
-function originalLine(fileCov, line, column) {
+function existsOnDisk(file) {
+  let known = existsCache.get(file);
+  if (known === undefined) {
+    try {
+      known = fs.existsSync(file);
+    } catch {
+      known = false;
+    }
+    existsCache.set(file, known);
+  }
+  return known;
+}
+
+/*
+ * A bundling runner (Angular's builder over Vitest) instruments chunks that
+ * exist nowhere on disk (`<root>/chunk-G3X6D2YX.js`), each carrying a map
+ * whose `sources` are the project-relative files it was built from
+ * (`src/app/greet.ts`, and `virtual:builder` for the runner's own glue).
+ * The counters are keyed by chunk, so the file a statement belongs to is
+ * the map's source at the segment, resolved against the chunk's folder,
+ * which is the project root. Vite's own transform keeps the key on disk,
+ * so the key stands and the map only moves the line.
+ */
+function sourceFile(fileCov, file, map, sourceIndex) {
+  if (!map || !Array.isArray(map.sources) || existsOnDisk(file)) {
+    return file;
+  }
+  const source = map.sources[sourceIndex];
+  if (typeof source !== 'string' || source.indexOf(':') >= 0 && !/^[A-Za-z]:[\\/]/.test(source)) {
+    return undefined;
+  }
+  const root = map.sourceRoot ? path.resolve(path.dirname(file), map.sourceRoot) : path.dirname(file);
+  const resolved = path.resolve(root, source);
+  return existsOnDisk(resolved) ? resolved : undefined;
+}
+
+/**
+ * Original file and 1-based line for a generated 1-based line / 0-based
+ * column: `{ file, line }`, the generated line and the coverage key when
+ * there is no map, or undefined when the segment belongs to a source that
+ * is not a file (a bundler's virtual module).
+ */
+function originalPosition(fileCov, file, line, column) {
   const map = fileCov && fileCov.inputSourceMap;
   if (!map || !map.mappings) {
-    return line;
+    return { file, line };
   }
   let decoded = decodedMaps.get(map);
   if (!decoded) {
@@ -120,7 +162,7 @@ function originalLine(fileCov, line, column) {
   }
   const segments = decoded[line - 1];
   if (!segments || segments.length === 0) {
-    return line;
+    return { file, line };
   }
   let best = segments[0];
   for (const seg of segments) {
@@ -130,7 +172,14 @@ function originalLine(fileCov, line, column) {
       break;
     }
   }
-  return best[1] + 1;
+  const target = sourceFile(fileCov, file, map, best[2]);
+  return target === undefined ? undefined : { file: target, line: best[1] + 1 };
+}
+
+/** Original 1-based line only; kept for callers that key by the coverage entry themselves. */
+function originalLine(fileCov, line, column) {
+  const pos = originalPosition(fileCov, '', line, column);
+  return pos ? pos.line : line;
 }
 
 let before = {};
@@ -157,18 +206,20 @@ function end(testId) {
       if (!map) {
         continue;
       }
-      const lines = new Set();
       for (const id of Object.keys(after[file])) {
         if ((after[file][id] || 0) > (prev[id] || 0)) {
           const stmt = map[id];
           if (stmt && stmt.start && typeof stmt.start.line === 'number') {
-            lines.add(originalLine(cov[file], stmt.start.line, stmt.start.column || 0));
+            const pos = originalPosition(cov[file], file, stmt.start.line, stmt.start.column || 0);
+            if (pos) {
+              (files[pos.file] || (files[pos.file] = new Set())).add(pos.line);
+            }
           }
         }
       }
-      if (lines.size > 0) {
-        files[file] = Array.from(lines).sort((a, b) => a - b);
-      }
+    }
+    for (const f of Object.keys(files)) {
+      files[f] = Array.from(files[f]).sort((a, b) => a - b);
     }
     fs.appendFileSync(outFile, `${JSON.stringify({ test: testId, files })}\n`);
   } catch {
@@ -176,4 +227,4 @@ function end(testId) {
   }
 }
 
-module.exports = { begin, end, decodeMappings, originalLine };
+module.exports = { begin, end, decodeMappings, originalLine, originalPosition };

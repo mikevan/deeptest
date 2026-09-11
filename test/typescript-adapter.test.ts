@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, coverageIstanbulSpec } from '../src/languages/typescript/coverage';
+import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, coverageIstanbulSpec, angularCliBin } from '../src/languages/typescript/coverage';
 import { typescriptPlugin } from '../src/languages/typescript';
-import { detectAngularRunner, detectFramework, frameworkSentence } from '../src/languages/typescript/framework';
+import { detectAngularRunner, detectAngularRunnerConfig, detectFramework, frameworkSentence } from '../src/languages/typescript/framework';
+import { createRequire } from 'node:module';
 import { guessLanguage } from '../src/detect/language';
 import { analyze } from '../src/engine/density';
 import { DEFAULT_DEPTH_OPTIONS } from '../src/engine/types';
@@ -208,23 +209,74 @@ test('plugin detect puts the framework first in the notes, and says ng test for 
   assert.match(vue.notes[1], /Found vitest/);
   const karma = await typescriptPlugin.detect(HW('angular-karma'), ctx);
   assert.equal(karma.notes[0], 'Framework: Angular 22, tests through ng test with Karma.');
-  assert.match(karma.notes[1], /ng test/);
-  assert.equal(karma.notes.some((n) => /Install/.test(n)), false, 'no install advice on an Angular project');
+  assert.match(karma.notes[1], /ng test.*Karma/);
+  assert.equal(karma.notes.some((n) => /Install/.test(n)), false, 'no install advice on a Karma project');
+  const ng = await typescriptPlugin.detect(HW('angular-vitest'), ctx);
+  assert.equal(ng.notes[0], 'Framework: Angular 22, tests through ng test with Vitest.');
+  assert.match(ng.notes[1], /DeepTest drives that builder/);
   const plain = await typescriptPlugin.detect(JEST_FIXTURE, ctx);
   assert.equal(plain.notes.some((n) => /^Framework:/.test(n)), false);
 });
 
-test('checkEnvironment on an Angular project refuses to run and offers no install (Karma and Vitest alike)', async () => {
+test('checkEnvironment on an Angular project: Karma is refused with no install; Vitest under the builder needs the CLI installed (1.0.4)', async () => {
   const source = new TypeScriptCoverageSource({ hooksDir: runtimeEnvironment().hooksDir });
-  for (const [port, runner] of [['angular-karma', 'Karma'], ['angular-vitest', 'Vitest']] as const) {
-    const env = await source.checkEnvironment({ workspaceRoot: HW(port), settings: settings('src'), log: () => undefined });
-    assert.equal(env.ok, false);
-    assert.equal(env.summary, `Angular, ng test with ${runner}`);
-    assert.equal(env.fix, undefined, `no fix offered on ${port}`);
-    assert.match(env.problems[0], new RegExp(`"ng test" with ${runner}`));
-    assert.match(env.problems[0], /Nothing needs installing\./);
-    assert.doesNotMatch(env.problems.join(' '), /Install Vitest|Install Jest/);
-  }
+  const karma = await source.checkEnvironment({ workspaceRoot: HW('angular-karma'), settings: settings('src'), log: () => undefined });
+  assert.equal(karma.ok, false);
+  assert.equal(karma.summary, 'Angular, ng test with Karma');
+  assert.equal(karma.fix, undefined, 'no fix offered on a Karma project');
+  assert.match(karma.problems[0], /"ng test" with Karma/);
+  assert.match(karma.problems[0], /Nothing needs installing\./);
+  assert.doesNotMatch(karma.problems.join(' '), /Install Vitest|Install Jest/);
+  // The fixture carries no node_modules, so the builder path stops at the CLI and asks for npm install, never for Vitest.
+  const vitest = await source.checkEnvironment({ workspaceRoot: HW('angular-vitest'), settings: settings('src'), log: () => undefined });
+  assert.equal(vitest.ok, false);
+  assert.match(vitest.summary, /Angular CLI not installed/);
+  assert.equal(vitest.fix?.title, 'Run npm install');
+  assert.match(vitest.problems[0], /"ng test"/);
+  assert.doesNotMatch(vitest.problems.join(' '), /Install Vitest|Install Jest/);
+  assert.equal(angularCliBin(HW('angular-vitest')), undefined);
+});
+
+test('the runner config Angular would load: named in angular.json, the default file, or none', () => {
+  assert.equal(detectAngularRunnerConfig(HW('angular-vitest')), undefined, 'the fixture has no runner config');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deeptest-ng-'));
+  const write = (runnerConfig: unknown) =>
+    fs.writeFileSync(path.join(dir, 'angular.json'), JSON.stringify({ projects: { app: { architect: { test: { builder: '@angular/build:unit-test', options: runnerConfig === undefined ? {} : { runnerConfig } } } } } }));
+  write(undefined);
+  assert.equal(detectAngularRunnerConfig(dir), undefined);
+  fs.writeFileSync(path.join(dir, 'vitest-base.config.ts'), '');
+  assert.equal(detectAngularRunnerConfig(dir), 'vitest-base.config.ts', 'the default file when the option is absent');
+  write(true);
+  assert.equal(detectAngularRunnerConfig(dir), 'vitest-base.config.ts');
+  write(false);
+  assert.equal(detectAngularRunnerConfig(dir), undefined, 'false means no external config');
+  fs.writeFileSync(path.join(dir, 'custom.config.mjs'), '');
+  write('custom.config.mjs');
+  assert.equal(detectAngularRunnerConfig(dir), 'custom.config.mjs');
+  write('missing.config.mjs');
+  assert.equal(detectAngularRunnerConfig(dir), undefined, 'a named file that does not exist is not imported');
+});
+
+test('the hook maps a bundled chunk\'s counters back to the source file through the chunk\'s source map (1.0.4)', () => {
+  const hook = createRequire(__filename)(path.join(process.cwd(), 'hooks', 'attribution.cjs')) as {
+    originalPosition: (fileCov: unknown, file: string, line: number, column: number) => { file: string; line: number } | undefined;
+    decodeMappings: (m: string) => number[][][];
+  };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deeptest-map-'));
+  fs.mkdirSync(path.join(dir, 'src'));
+  fs.writeFileSync(path.join(dir, 'src', 'a.ts'), 'x\ny\n');
+  // Three generated lines: [0,0,0,0] -> a.ts line 1; [0,0,+1,0] -> a.ts line 2; [0,+1,0,0] -> the builder's virtual module.
+  const map = { sources: ['src/a.ts', 'virtual:builder'], mappings: 'AAAA;AACA;ACAA' };
+  assert.deepEqual(hook.decodeMappings(map.mappings), [[[0, 0, 0]], [[0, 1, 0]], [[0, 1, 1]]]);
+  const chunk = path.join(dir, 'chunk-ABC123.js');
+  assert.equal(fs.existsSync(chunk), false, 'the chunk exists nowhere on disk');
+  assert.deepEqual(hook.originalPosition({ inputSourceMap: map }, chunk, 1, 0), { file: path.join(dir, 'src', 'a.ts'), line: 1 });
+  assert.deepEqual(hook.originalPosition({ inputSourceMap: map }, chunk, 2, 0), { file: path.join(dir, 'src', 'a.ts'), line: 2 });
+  assert.equal(hook.originalPosition({ inputSourceMap: map }, chunk, 3, 0), undefined, 'a virtual module is nobody\'s line');
+  // A file that is on disk keeps its key and only moves the line (Vite's own transform).
+  const onDisk = path.join(dir, 'src', 'a.ts');
+  assert.deepEqual(hook.originalPosition({ inputSourceMap: { sources: ['a.ts'], mappings: 'AAAA;AACA' } }, onDisk, 2, 0), { file: onDisk, line: 2 });
+  assert.deepEqual(hook.originalPosition({}, onDisk, 5, 0), { file: onDisk, line: 5 }, 'no map, no change');
 });
 
 test('.vue and .svelte files are walked as sources and are in the plugin\'s extensions', () => {

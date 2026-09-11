@@ -24,9 +24,15 @@ import * as path from 'node:path';
 import { FileCoverage } from '../../engine/types';
 import { runProcess } from '../shared/process';
 import { CoverageRun, CoverageSource, EnvironmentCheck, LanguageSettings, RunContext, TestRunSummary } from '../types';
-import { detectFramework } from './framework';
+import { detectAngularRunnerConfig, detectFramework } from './framework';
 
-export type Runner = 'jest' | 'vitest';
+/**
+ * jest and vitest are driven through their own binaries. ng-vitest is
+ * Vitest under Angular's unit-test builder, driven through `ng test`,
+ * because an Angular project's tests need the Angular compiler and
+ * TestBed that only the builder provides (1.0 survey, finding 3a).
+ */
+export type Runner = 'jest' | 'vitest' | 'ng-vitest';
 
 export interface TsFields {
   runner: 'auto' | Runner;
@@ -278,7 +284,14 @@ export class TypeScriptCoverageSource implements CoverageSource {
 
   private runnerFor(workspaceRoot: string, settings: LanguageSettings): Runner | undefined {
     const { runner } = tsFields(settings);
-    return runner === 'auto' ? detectRunner(workspaceRoot) : runner;
+    if (runner !== 'auto') {
+      return runner;
+    }
+    const framework = detectFramework(workspaceRoot);
+    if (framework?.name === 'Angular' && framework.angularRunner === 'vitest') {
+      return 'ng-vitest';
+    }
+    return detectRunner(workspaceRoot);
   }
 
   async discoverTests(ctx: Pick<RunContext, 'workspaceRoot' | 'settings'>): Promise<string[]> {
@@ -294,17 +307,13 @@ export class TypeScriptCoverageSource implements CoverageSource {
 
   async checkEnvironment(ctx: Pick<RunContext, 'workspaceRoot' | 'settings' | 'log'>): Promise<EnvironmentCheck> {
     const framework = detectFramework(ctx.workspaceRoot);
-    if (framework?.name === 'Angular' && framework.angularRunner) {
-      // Angular's tests run through the CLI's builder, not the vitest or karma
-      // binaries. Driving the binary bypasses the Angular compiler and TestBed
-      // (1.0 survey, finding 3a), and offering "Install Vitest" to a Karma
-      // project is wrong advice (finding 4). Until the builder driver lands
-      // (1.0.4 for Vitest, 1.0.5 for Karma) DeepTest says so and offers nothing.
-      const runnerName = framework.angularRunner === 'karma' ? 'Karma' : 'Vitest';
+    if (framework?.name === 'Angular' && framework.angularRunner === 'karma') {
+      // Karma under the builder has no hook yet (1.0.5). Offering "Install
+      // Vitest" here is wrong advice (survey finding 4), so nothing is offered.
       return {
         ok: false,
-        summary: `Angular, ng test with ${runnerName}`,
-        problems: [`This is an Angular project whose tests run through "ng test" with ${runnerName}. DeepTest cannot drive Angular's test builder yet; that is coming in a 1.0 update. Nothing needs installing.`],
+        summary: 'Angular, ng test with Karma',
+        problems: ['This is an Angular project whose tests run through "ng test" with Karma. DeepTest cannot drive Karma yet; that is coming in a 1.0 update. Nothing needs installing.'],
       };
     }
     const problems: string[] = [];
@@ -316,6 +325,9 @@ export class TypeScriptCoverageSource implements CoverageSource {
       return { ok: false, summary: 'Node.js not found', problems: [`${(err as Error).message} Install Node.js and make sure "node" is on PATH.`] };
     }
     const runner = this.runnerFor(ctx.workspaceRoot, ctx.settings);
+    if (runner === 'ng-vitest') {
+      return this.checkAngularEnvironment(ctx.workspaceRoot, nodeVersion);
+    }
     if (!runner) {
       return {
         ok: false,
@@ -355,27 +367,59 @@ export class TypeScriptCoverageSource implements CoverageSource {
     return { ok: true, summary: `Node ${nodeVersion}, ${runner} ${runnerVersion}`, problems: [] };
   }
 
+  /**
+   * Angular with Vitest under the builder. `ng test` needs the CLI, Vitest,
+   * and the istanbul coverage provider: the builder picks v8 when both
+   * providers are installed or only v8 is, and v8 keeps no live counters
+   * for the hook to snapshot, so the generated runner config pins istanbul
+   * and the package has to be there.
+   */
+  private checkAngularEnvironment(workspaceRoot: string, nodeVersion: string): EnvironmentCheck {
+    const cli = angularCliBin(workspaceRoot);
+    if (!cli) {
+      return {
+        ok: false,
+        summary: `Node ${nodeVersion}, Angular CLI not installed`,
+        problems: ['This Angular project runs its tests through "ng test", but @angular/cli is not installed under node_modules. Run npm install.'],
+        fix: { title: 'Run npm install', command: 'npm', args: ['install'] },
+      };
+    }
+    const vitestDir = resolveModuleDir(workspaceRoot, 'vitest');
+    if (!vitestDir) {
+      return {
+        ok: false,
+        summary: `Node ${nodeVersion}, vitest not installed`,
+        problems: ['This Angular project runs its tests through "ng test" with Vitest, but vitest is not installed under node_modules. Run npm install.'],
+        fix: { title: 'Run npm install', command: 'npm', args: ['install'] },
+      };
+    }
+    let vitestVersion = '';
+    try {
+      vitestVersion = JSON.parse(fs.readFileSync(path.join(vitestDir, 'package.json'), 'utf8')).version ?? '';
+    } catch {
+      // version is decoration
+    }
+    if (!resolveModuleDir(workspaceRoot, '@vitest/coverage-istanbul')) {
+      const spec = coverageIstanbulSpec(vitestVersion);
+      return {
+        ok: false,
+        summary: `Node ${nodeVersion}, ng test with vitest ${vitestVersion}`,
+        problems: [`Angular's test builder needs ${spec} for per-test attribution.`],
+        fix: { title: `Install ${spec}`, command: 'npm', args: ['install', '--save-dev', spec] },
+      };
+    }
+    return { ok: true, summary: `Node ${nodeVersion}, ng test with vitest ${vitestVersion}`, problems: [] };
+  }
+
   async run(ctx: RunContext): Promise<CoverageRun> {
     const runner = this.runnerFor(ctx.workspaceRoot, ctx.settings);
     if (!runner) {
       throw new Error('No test runner. Pick Jest or Vitest on the configuration screen.');
     }
-    const workDir = path.join(ctx.workspaceRoot, '.deeptest');
-    const attrDir = path.join(workDir, 'attribution');
-    const coverageDir = path.join(workDir, 'coverage');
-    fs.rmSync(attrDir, { recursive: true, force: true });
-    fs.rmSync(coverageDir, { recursive: true, force: true });
-    fs.mkdirSync(attrDir, { recursive: true });
-    // The hook and its helper are copied into .deeptest/ and loaded from there
-    // (see hooks/vitest.mjs for why); the helper is found through the
-    // environment so a bundling runner cannot break the path.
-    const hookDir = path.join(workDir, 'hooks');
-    fs.mkdirSync(hookDir, { recursive: true });
-    for (const file of ['vitest.mjs', 'attribution.cjs']) {
-      fs.copyFileSync(path.join(this.options.hooksDir, file), path.join(hookDir, file));
+    if (runner === 'ng-vitest') {
+      return this.runAngular(ctx);
     }
-    ctx.log(`Hook copied into ${hookDir}.`);
-    const env = { ...process.env, DEEPTEST_ATTRIBUTION_DIR: attrDir, DEEPTEST_HOOKS_DIR: hookDir, CI: process.env.CI ?? 'true', NO_COLOR: '1', FORCE_COLOR: '0' };
+    const { workDir, attrDir, coverageDir, hookDir, env } = this.prepareWorkDir(ctx);
     const { extraArgs } = tsFields(ctx.settings);
     const sourceGlobRoot = ctx.settings.sourceRoot || '.';
     const testsPath = ctx.settings.testsPath;
@@ -478,9 +522,33 @@ export class TypeScriptCoverageSource implements CoverageSource {
     }
 
     const tests = runner === 'jest' ? parseJestSummary(output, exitCode) : parseVitestSummary(output, exitCode);
+    return this.collect(ctx, runner, coverageDir, attrDir, tests, exitCode);
+  }
+
+  private prepareWorkDir(ctx: RunContext): { workDir: string; attrDir: string; coverageDir: string; hookDir: string; env: NodeJS.ProcessEnv } {
+    const workDir = path.join(ctx.workspaceRoot, '.deeptest');
+    const attrDir = path.join(workDir, 'attribution');
+    const coverageDir = path.join(workDir, 'coverage');
+    fs.rmSync(attrDir, { recursive: true, force: true });
+    fs.rmSync(coverageDir, { recursive: true, force: true });
+    fs.mkdirSync(attrDir, { recursive: true });
+    // The hook and its helper are copied into .deeptest/ and loaded from there
+    // (see hooks/vitest.mjs for why); the helper is found through the
+    // environment so a bundling runner cannot break the path.
+    const hookDir = path.join(workDir, 'hooks');
+    fs.mkdirSync(hookDir, { recursive: true });
+    for (const file of ['vitest.mjs', 'attribution.cjs']) {
+      fs.copyFileSync(path.join(this.options.hooksDir, file), path.join(hookDir, file));
+    }
+    ctx.log(`Hook copied into ${hookDir}.`);
+    const env = { ...process.env, DEEPTEST_ATTRIBUTION_DIR: attrDir, DEEPTEST_HOOKS_DIR: hookDir, CI: process.env.CI ?? 'true', NO_COLOR: '1', FORCE_COLOR: '0' };
+    return { workDir, attrDir, coverageDir, hookDir, env };
+  }
+
+  private collect(ctx: RunContext, runner: Runner, coverageDir: string, attrDir: string, tests: TestRunSummary, exitCode: number | null): CoverageRun {
     const finalJson = path.join(coverageDir, 'coverage-final.json');
     if (!fs.existsSync(finalJson)) {
-      throw new Error(`${runner} produced no coverage, and ended with exit code ${exitCode}. Press "Show the log" to see the test run.`);
+      throw new Error(`${runner === 'ng-vitest' ? 'ng test' : runner} produced no coverage, and ended with exit code ${exitCode}. Press "Show the log" to see the test run.`);
     }
     const attribution: string[] = [];
     for (const file of fs.readdirSync(attrDir)) {
@@ -494,4 +562,87 @@ export class TypeScriptCoverageSource implements CoverageSource {
     const coverages = buildCoverages(ctx.workspaceRoot, fs.readFileSync(finalJson, 'utf8'), attribution);
     return { coverages, tests, measuredFiles: coverages.map((c) => c.path) };
   }
+
+  /**
+   * Angular with Vitest, through the builder. The run is `ng test` with
+   * the hook as a setup file (a project-relative path: the builder bundles
+   * setup files and appends an absolute path to the project root), a
+   * generated runner config that wraps the project's own and pins the
+   * istanbul provider and the reports directory, `--coverage-include` so
+   * the report holds every source file and not only the ones a test
+   * loaded, and `--isolate`. Isolation is the one that is not obvious:
+   * the builder defaults it off to match Karma, and without it the setup
+   * file runs once per worker, its hooks attach to the first spec file
+   * only, and ten of eleven tests come back unattributed (1.0.4 notes).
+   * The builder instruments its own chunks, so the hook maps each counter
+   * back to the source file through the chunk's source map (hooks/attribution.cjs).
+   */
+  private async runAngular(ctx: RunContext): Promise<CoverageRun> {
+    const cli = angularCliBin(ctx.workspaceRoot);
+    if (!cli) {
+      throw new Error('@angular/cli is not installed. Run npm install.');
+    }
+    const { workDir, attrDir, coverageDir, hookDir, env } = this.prepareWorkDir(ctx);
+    const { extraArgs } = tsFields(ctx.settings);
+    const sourceGlobRoot = ctx.settings.sourceRoot || '.';
+    const testsPath = ctx.settings.testsPath;
+    const posix = (p: string): string => p.split(path.sep).join('/');
+    const relativeImport = (p: string): string => {
+      const rel = posix(path.relative(workDir, p));
+      return rel.startsWith('.') ? rel : `./${rel}`;
+    };
+    const userConfig = detectAngularRunnerConfig(ctx.workspaceRoot);
+    const wrapper = [
+      '// Generated by DeepTest on every run. Wraps the runner config Angular would load; do not edit.',
+      "import { defineConfig, mergeConfig } from 'vitest/config';",
+      userConfig ? `import base from ${JSON.stringify(relativeImport(path.join(ctx.workspaceRoot, userConfig)))};` : 'const base = {};',
+      "const resolved = typeof base === 'function' ? await base({ command: 'serve', mode: 'test' }) : base;",
+      'export default mergeConfig(resolved, defineConfig({',
+      '  test: {',
+      '    coverage: {',
+      "      provider: 'istanbul',",
+      `      reportsDirectory: ${JSON.stringify(coverageDir)},`,
+      '    },',
+      '  },',
+      '}));',
+      '',
+    ].join('\n');
+    const wrapperPath = path.join(workDir, 'vitest.config.mjs');
+    fs.writeFileSync(wrapperPath, wrapper, 'utf8');
+    const include = `${sourceGlobRoot === '.' ? '' : `${sourceGlobRoot}/`}**/*.${SOURCE_GLOB_EXTENSIONS}`;
+    const args = [
+      cli,
+      'test',
+      '--watch=false',
+      '--isolate',
+      '--coverage',
+      '--coverage-reporters',
+      'json',
+      '--coverage-include',
+      include,
+      // One flag per value: the CLI's array options swallow every following
+      // word otherwise, and the run dies with "Unknown arguments".
+      ...['**/*.spec.*', '**/*.test.*', '**/.deeptest/**'].flatMap((g) => ['--coverage-exclude', g]),
+      ...(testsPath ? [`${testsPath}/**/*.spec.*`, `${testsPath}/**/*.test.*`].flatMap((g) => ['--include', g]) : []),
+      '--setup-files',
+      posix(path.relative(ctx.workspaceRoot, path.join(hookDir, 'vitest.mjs'))),
+      '--runner-config',
+      posix(path.relative(ctx.workspaceRoot, wrapperPath)),
+      ...splitArgs(extraArgs),
+    ];
+    ctx.log(`$ node ${args.join(' ')}`);
+    const run = await runProcess('node', args, { cwd: ctx.workspaceRoot, env, log: ctx.log, signal: ctx.signal });
+    const tests = parseVitestSummary(run.output, run.exitCode);
+    return this.collect(ctx, 'ng-vitest', coverageDir, attrDir, tests, run.exitCode);
+  }
+}
+
+/** node_modules/@angular/cli/bin/ng.js, when the CLI is installed in the project. */
+export function angularCliBin(workspaceRoot: string): string | undefined {
+  const dir = resolveModuleDir(workspaceRoot, '@angular/cli');
+  if (!dir) {
+    return undefined;
+  }
+  const bin = path.join(dir, 'bin', 'ng.js');
+  return fs.existsSync(bin) ? bin : undefined;
 }
