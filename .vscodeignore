@@ -13,3 +13,13 @@ hooks/**
 vitest.config.ts
 .deeptest/**
 *.vsix
+
+.keepsafe/**
+.refactorit/**
+_to_delete/**
+Claude outputs/**
+*.zip
+.vscodeignore
+media/**
+!media/deeptestLogo.png
+!media/*.svg

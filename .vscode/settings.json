@@ -18,5 +18,18 @@
     "deeptest.depth.countTernary": true,
     "deeptest.depth.countComprehensions": true,
     "deeptest.depth.countExcept": true,
-    "deeptest.overlay.showInlineNumbers": true
+    "deeptest.overlay.showInlineNumbers": true,
+    "refactorit.language": "typescript",
+    "refactorit.testsPath": "test",
+    "refactorit.sourceRoot": "src",
+    "refactorit.languageSettings": {
+        "typescript": {
+            "runner": "auto",
+            "extraArgs": ""
+        }
+    },
+    "refactorit.limit": 5,
+    "refactorit.rounds": 3,
+    "refactorit.showNumbers": true,
+    "refactorit.keepSafe.offerCheckpoint": true
 }
