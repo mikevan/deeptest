@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, coverageIstanbulSpec, angularCliBin } from '../src/languages/typescript/coverage';
+import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, coverageIstanbulSpec, angularCliBin, parseKarmaSummary, unloadedCoverages } from '../src/languages/typescript/coverage';
 import { typescriptPlugin } from '../src/languages/typescript';
-import { detectAngularRunner, detectAngularRunnerConfig, detectFramework, frameworkSentence } from '../src/languages/typescript/framework';
+import { detectAngularBuilder, detectAngularKarmaConfig, detectAngularRunner, detectAngularRunnerConfig, detectFramework, frameworkSentence } from '../src/languages/typescript/framework';
 import { createRequire } from 'node:module';
 import { guessLanguage } from '../src/detect/language';
 import { analyze } from '../src/engine/density';
@@ -209,7 +209,7 @@ test('plugin detect puts the framework first in the notes, and says ng test for 
   assert.match(vue.notes[1], /Found vitest/);
   const karma = await typescriptPlugin.detect(HW('angular-karma'), ctx);
   assert.equal(karma.notes[0], 'Framework: Angular 22, tests through ng test with Karma.');
-  assert.match(karma.notes[1], /ng test.*Karma/);
+  assert.match(karma.notes[1], /ng test.*Karma.*generated Karma config/);
   assert.equal(karma.notes.some((n) => /Install/.test(n)), false, 'no install advice on a Karma project');
   const ng = await typescriptPlugin.detect(HW('angular-vitest'), ctx);
   assert.equal(ng.notes[0], 'Framework: Angular 22, tests through ng test with Vitest.');
@@ -218,23 +218,78 @@ test('plugin detect puts the framework first in the notes, and says ng test for 
   assert.equal(plain.notes.some((n) => /^Framework:/.test(n)), false);
 });
 
-test('checkEnvironment on an Angular project: Karma is refused with no install; Vitest under the builder needs the CLI installed (1.0.4)', async () => {
+test('checkEnvironment on an Angular project: both flavours want the CLI installed first, and the older Karma builder is refused (1.0.5)', async () => {
   const source = new TypeScriptCoverageSource({ hooksDir: runtimeEnvironment().hooksDir });
-  const karma = await source.checkEnvironment({ workspaceRoot: HW('angular-karma'), settings: settings('src'), log: () => undefined });
-  assert.equal(karma.ok, false);
-  assert.equal(karma.summary, 'Angular, ng test with Karma');
-  assert.equal(karma.fix, undefined, 'no fix offered on a Karma project');
-  assert.match(karma.problems[0], /"ng test" with Karma/);
-  assert.match(karma.problems[0], /Nothing needs installing\./);
-  assert.doesNotMatch(karma.problems.join(' '), /Install Vitest|Install Jest/);
-  // The fixture carries no node_modules, so the builder path stops at the CLI and asks for npm install, never for Vitest.
-  const vitest = await source.checkEnvironment({ workspaceRoot: HW('angular-vitest'), settings: settings('src'), log: () => undefined });
-  assert.equal(vitest.ok, false);
-  assert.match(vitest.summary, /Angular CLI not installed/);
-  assert.equal(vitest.fix?.title, 'Run npm install');
-  assert.match(vitest.problems[0], /"ng test"/);
-  assert.doesNotMatch(vitest.problems.join(' '), /Install Vitest|Install Jest/);
+  // The fixtures carry no node_modules, so both builder paths stop at the CLI and ask for npm install, never for Vitest.
+  for (const [port, runner] of [['angular-karma', 'Karma'], ['angular-vitest', 'Vitest']] as const) {
+    const env = await source.checkEnvironment({ workspaceRoot: HW(port), settings: settings('src'), log: () => undefined });
+    assert.equal(env.ok, false);
+    assert.match(env.summary, /Angular CLI not installed/);
+    assert.equal(env.fix?.title, 'Run npm install');
+    assert.match(env.problems[0], new RegExp(`"ng test" with ${runner}`));
+    assert.doesNotMatch(env.problems.join(' '), /Install Vitest|Install Jest/);
+  }
   assert.equal(angularCliBin(HW('angular-vitest')), undefined);
+  const legacy = fs.mkdtempSync(path.join(os.tmpdir(), 'deeptest-legacy-'));
+  fs.writeFileSync(path.join(legacy, 'package.json'), JSON.stringify({ dependencies: { '@angular/core': '^16.0.0' } }));
+  fs.writeFileSync(path.join(legacy, 'angular.json'), JSON.stringify({ projects: { app: { architect: { test: { builder: '@angular-devkit/build-angular:karma' } } } } }));
+  assert.equal(detectAngularBuilder(legacy), 'legacy-karma');
+  assert.equal(detectAngularRunner(legacy), 'karma');
+  const refused = await source.checkEnvironment({ workspaceRoot: legacy, settings: settings('src'), log: () => undefined });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.summary, 'Angular, the older Karma builder');
+  assert.equal(refused.fix, undefined);
+  assert.match(refused.problems[0], /@angular-devkit\/build-angular:karma/);
+  assert.match(refused.problems[0], /Nothing needs installing\./);
+  assert.equal(detectAngularBuilder(HW('angular-karma')), 'unit-test');
+  assert.equal(detectAngularBuilder(JEST_FIXTURE), undefined);
+});
+
+test('parseKarmaSummary reads the last Executed line', () => {
+  const ok = 'Chrome Headless 141.0.7390.37 (Linux 0.0.0): Executed 10 of 11 SUCCESS (0 secs / 0.02 secs)\nChrome Headless 141.0.7390.37 (Linux 0.0.0): Executed 11 of 11 SUCCESS (0.029 secs / 0.022 secs)\nTOTAL: 11 SUCCESS\n';
+  assert.deepEqual(parseKarmaSummary(ok, 0), { passed: 11, failed: 0, errors: 0, skipped: 0, exitCode: 0 });
+  const failed = 'Chrome Headless (Linux): Executed 11 of 11 (2 FAILED) (0.03 secs / 0.02 secs)\nTOTAL: 2 FAILED, 9 SUCCESS\n';
+  assert.deepEqual(parseKarmaSummary(failed, 1), { passed: 9, failed: 2, errors: 0, skipped: 0, exitCode: 1 });
+  const skipped = 'Chrome Headless (Linux): Executed 9 of 11 (skipped 2) SUCCESS (0.03 secs / 0.02 secs)\n';
+  assert.deepEqual(parseKarmaSummary(skipped, 0), { passed: 9, failed: 0, errors: 0, skipped: 2, exitCode: 0 });
+  assert.deepEqual(parseKarmaSummary('Application bundle generation failed.\n', 1), { passed: 0, failed: 0, errors: 1, skipped: 0, exitCode: 1 });
+  const nothing = 'Chrome Headless (Linux) ERROR\n  Error: Cannot find module\nChrome Headless (Linux): Executed 0 of 0 ERROR (0 secs / 0 secs)\n';
+  assert.equal(parseKarmaSummary(nothing, 1).errors, 1);
+  assert.equal(parseKarmaSummary(nothing, 1).passed, 0);
+});
+
+test('the Karma config Angular would load: named, the project karma.conf.js, or none', () => {
+  assert.equal(detectAngularKarmaConfig(HW('angular-karma')), undefined, 'the fixture has no karma.conf.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deeptest-karma-'));
+  const write = (options: unknown, builder = '@angular/build:unit-test') =>
+    fs.writeFileSync(path.join(dir, 'angular.json'), JSON.stringify({ projects: { app: { root: '', architect: { test: { builder, options } } } } }));
+  write({ runner: 'karma' });
+  assert.equal(detectAngularKarmaConfig(dir), undefined, 'no runnerConfig means the built-in defaults');
+  write({ runner: 'karma', runnerConfig: true });
+  assert.equal(detectAngularKarmaConfig(dir), undefined, 'true but no karma.conf.js');
+  fs.writeFileSync(path.join(dir, 'karma.conf.js'), '');
+  assert.equal(detectAngularKarmaConfig(dir), 'karma.conf.js');
+  fs.writeFileSync(path.join(dir, 'custom.karma.cjs'), '');
+  write({ runner: 'karma', runnerConfig: 'custom.karma.cjs' });
+  assert.equal(detectAngularKarmaConfig(dir), 'custom.karma.cjs');
+  write({ karmaConfig: 'karma.conf.js' }, '@angular-devkit/build-angular:karma');
+  assert.equal(detectAngularKarmaConfig(dir), 'karma.conf.js', 'the older builder names it karmaConfig');
+});
+
+test('files a Karma run never loaded get their executable lines from the source, all untested', () => {
+  const log: string[] = [];
+  // DeepTest\'s own node_modules carries istanbul-lib-instrument (through @vitest/coverage-istanbul), so the repository root stands in for the project.
+  const out = unloadedCoverages(process.cwd(), ['test/fixtures/helloworld-angular-karma/src/app/schedule.service.ts', 'test/fixtures/helloworld-angular-karma/src/main.ts', 'test/fixtures/helloworld-angular-karma/src/app/missing.ts'], (l) => log.push(l));
+  assert.equal(out.length, 2, log.join('\n'));
+  const villain = out[0];
+  assert.equal(villain.path, 'test/fixtures/helloworld-angular-karma/src/app/schedule.service.ts');
+  const lines = Array.from(villain.lines.keys()).sort((a, b) => a - b);
+  assert.equal(lines[0], 13, 'the first if inside pickGreeting; the decorator and class field above it are not statements in the source');
+  assert.ok(lines.length > 40, `${lines.length} executable lines`);
+  assert.ok(Array.from(villain.lines.values()).every((tests) => tests.size === 0), 'no test on any of them');
+  assert.equal(villain.executed.size, 0);
+  assert.deepEqual(Array.from(out[1].lines.keys()), [5, 6]);
+  assert.match(log[0], /Could not read the executable lines of .*missing\.ts/);
 });
 
 test('the runner config Angular would load: named in angular.json, the default file, or none', () => {

@@ -24,7 +24,7 @@ import * as path from 'node:path';
 import { FileCoverage } from '../../engine/types';
 import { runProcess } from '../shared/process';
 import { CoverageRun, CoverageSource, EnvironmentCheck, LanguageSettings, RunContext, TestRunSummary } from '../types';
-import { detectAngularRunnerConfig, detectFramework } from './framework';
+import { detectAngularKarmaConfig, detectAngularRunnerConfig, detectFramework } from './framework';
 
 /**
  * jest and vitest are driven through their own binaries. ng-vitest is
@@ -32,7 +32,7 @@ import { detectAngularRunnerConfig, detectFramework } from './framework';
  * because an Angular project's tests need the Angular compiler and
  * TestBed that only the builder provides (1.0 survey, finding 3a).
  */
-export type Runner = 'jest' | 'vitest' | 'ng-vitest';
+export type Runner = 'jest' | 'vitest' | 'ng-vitest' | 'ng-karma';
 
 export interface TsFields {
   runner: 'auto' | Runner;
@@ -288,8 +288,8 @@ export class TypeScriptCoverageSource implements CoverageSource {
       return runner;
     }
     const framework = detectFramework(workspaceRoot);
-    if (framework?.name === 'Angular' && framework.angularRunner === 'vitest') {
-      return 'ng-vitest';
+    if (framework?.name === 'Angular' && framework.angularRunner && framework.angularBuilder === 'unit-test') {
+      return framework.angularRunner === 'karma' ? 'ng-karma' : 'ng-vitest';
     }
     return detectRunner(workspaceRoot);
   }
@@ -306,16 +306,6 @@ export class TypeScriptCoverageSource implements CoverageSource {
   }
 
   async checkEnvironment(ctx: Pick<RunContext, 'workspaceRoot' | 'settings' | 'log'>): Promise<EnvironmentCheck> {
-    const framework = detectFramework(ctx.workspaceRoot);
-    if (framework?.name === 'Angular' && framework.angularRunner === 'karma') {
-      // Karma under the builder has no hook yet (1.0.5). Offering "Install
-      // Vitest" here is wrong advice (survey finding 4), so nothing is offered.
-      return {
-        ok: false,
-        summary: 'Angular, ng test with Karma',
-        problems: ['This is an Angular project whose tests run through "ng test" with Karma. DeepTest cannot drive Karma yet; that is coming in a 1.0 update. Nothing needs installing.'],
-      };
-    }
     const problems: string[] = [];
     let nodeVersion = '';
     try {
@@ -324,9 +314,20 @@ export class TypeScriptCoverageSource implements CoverageSource {
     } catch (err) {
       return { ok: false, summary: 'Node.js not found', problems: [`${(err as Error).message} Install Node.js and make sure "node" is on PATH.`] };
     }
+    const framework = detectFramework(ctx.workspaceRoot);
+    if (framework?.name === 'Angular' && framework.angularBuilder === 'legacy-karma' && tsFields(ctx.settings).runner === 'auto') {
+      // The older devkit builder takes different flags (--karma-config,
+      // --code-coverage) and has not been run against a fixture. Saying so
+      // beats driving it blind; offering "Install Vitest" would be wrong.
+      return {
+        ok: false,
+        summary: 'Angular, the older Karma builder',
+        problems: ['This Angular project tests through the older "@angular-devkit/build-angular:karma" builder. DeepTest drives the "@angular/build:unit-test" builder, with Karma or Vitest under it; Angular\'s "ng update" moves a project across. Nothing needs installing.'],
+      };
+    }
     const runner = this.runnerFor(ctx.workspaceRoot, ctx.settings);
-    if (runner === 'ng-vitest') {
-      return this.checkAngularEnvironment(ctx.workspaceRoot, nodeVersion);
+    if (runner === 'ng-vitest' || runner === 'ng-karma') {
+      return this.checkAngularEnvironment(ctx.workspaceRoot, nodeVersion, runner);
     }
     if (!runner) {
       return {
@@ -374,15 +375,46 @@ export class TypeScriptCoverageSource implements CoverageSource {
    * for the hook to snapshot, so the generated runner config pins istanbul
    * and the package has to be there.
    */
-  private checkAngularEnvironment(workspaceRoot: string, nodeVersion: string): EnvironmentCheck {
+  private checkAngularEnvironment(workspaceRoot: string, nodeVersion: string, runner: 'ng-vitest' | 'ng-karma'): EnvironmentCheck {
+    const runnerName = runner === 'ng-karma' ? 'Karma' : 'Vitest';
     const cli = angularCliBin(workspaceRoot);
     if (!cli) {
       return {
         ok: false,
         summary: `Node ${nodeVersion}, Angular CLI not installed`,
-        problems: ['This Angular project runs its tests through "ng test", but @angular/cli is not installed under node_modules. Run npm install.'],
+        problems: [`This Angular project runs its tests through "ng test" with ${runnerName}, but @angular/cli is not installed under node_modules. Run npm install.`],
         fix: { title: 'Run npm install', command: 'npm', args: ['install'] },
       };
+    }
+    if (runner === 'ng-karma') {
+      // Karma needs its own Jasmine adapter, a Chrome launcher, and
+      // karma-coverage for the counters; all three are in every Angular
+      // CLI project's devDependencies. istanbul-lib-instrument, which the
+      // builder itself requires for coverage, gives the executable lines of
+      // the files no test loads.
+      for (const [pkg, why] of [
+        ['karma', 'the runner'],
+        ['karma-jasmine', 'the Jasmine adapter'],
+        ['karma-chrome-launcher', 'the headless Chrome launcher'],
+        ['karma-coverage', 'the coverage counters'],
+        ['istanbul-lib-instrument', 'the executable lines of files no test loads'],
+      ] as const) {
+        if (!resolveModuleDir(workspaceRoot, pkg)) {
+          return {
+            ok: false,
+            summary: `Node ${nodeVersion}, ng test with Karma, ${pkg} missing`,
+            problems: [`Karma needs ${pkg} (${why}), and it is not installed under node_modules.`],
+            fix: { title: `Install ${pkg}`, command: 'npm', args: ['install', '--save-dev', pkg] },
+          };
+        }
+      }
+      let karmaVersion = '';
+      try {
+        karmaVersion = JSON.parse(fs.readFileSync(path.join(resolveModuleDir(workspaceRoot, 'karma')!, 'package.json'), 'utf8')).version ?? '';
+      } catch {
+        // version is decoration
+      }
+      return { ok: true, summary: `Node ${nodeVersion}, ng test with karma ${karmaVersion}`, problems: [] };
     }
     const vitestDir = resolveModuleDir(workspaceRoot, 'vitest');
     if (!vitestDir) {
@@ -418,6 +450,9 @@ export class TypeScriptCoverageSource implements CoverageSource {
     }
     if (runner === 'ng-vitest') {
       return this.runAngular(ctx);
+    }
+    if (runner === 'ng-karma') {
+      return this.runAngularKarma(ctx);
     }
     const { workDir, attrDir, coverageDir, hookDir, env } = this.prepareWorkDir(ctx);
     const { extraArgs } = tsFields(ctx.settings);
@@ -537,7 +572,7 @@ export class TypeScriptCoverageSource implements CoverageSource {
     // environment so a bundling runner cannot break the path.
     const hookDir = path.join(workDir, 'hooks');
     fs.mkdirSync(hookDir, { recursive: true });
-    for (const file of ['vitest.mjs', 'attribution.cjs']) {
+    for (const file of ['vitest.mjs', 'attribution.cjs', 'karma.cjs', 'karma-client.js']) {
       fs.copyFileSync(path.join(this.options.hooksDir, file), path.join(hookDir, file));
     }
     ctx.log(`Hook copied into ${hookDir}.`);
@@ -545,10 +580,10 @@ export class TypeScriptCoverageSource implements CoverageSource {
     return { workDir, attrDir, coverageDir, hookDir, env };
   }
 
-  private collect(ctx: RunContext, runner: Runner, coverageDir: string, attrDir: string, tests: TestRunSummary, exitCode: number | null): CoverageRun {
+  private collect(ctx: RunContext, runner: Runner, coverageDir: string, attrDir: string, tests: TestRunSummary, exitCode: number | null, extra: FileCoverage[] = []): CoverageRun {
     const finalJson = path.join(coverageDir, 'coverage-final.json');
     if (!fs.existsSync(finalJson)) {
-      throw new Error(`${runner === 'ng-vitest' ? 'ng test' : runner} produced no coverage, and ended with exit code ${exitCode}. Press "Show the log" to see the test run.`);
+      throw new Error(`${runner === 'ng-vitest' || runner === 'ng-karma' ? 'ng test' : runner} produced no coverage, and ended with exit code ${exitCode}. Press "Show the log" to see the test run.`);
     }
     const attribution: string[] = [];
     for (const file of fs.readdirSync(attrDir)) {
@@ -560,6 +595,13 @@ export class TypeScriptCoverageSource implements CoverageSource {
       ctx.log('The attribution hook produced nothing, so every executed line will show as having run at startup only.');
     }
     const coverages = buildCoverages(ctx.workspaceRoot, fs.readFileSync(finalJson, 'utf8'), attribution);
+    const seen = new Set(coverages.map((c) => c.path));
+    for (const c of extra) {
+      if (!seen.has(c.path)) {
+        coverages.push(c);
+      }
+    }
+    coverages.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     return { coverages, tests, measuredFiles: coverages.map((c) => c.path) };
   }
 
@@ -635,6 +677,150 @@ export class TypeScriptCoverageSource implements CoverageSource {
     const tests = parseVitestSummary(run.output, run.exitCode);
     return this.collect(ctx, 'ng-vitest', coverageDir, attrDir, tests, run.exitCode);
   }
+
+  /**
+   * Angular with Karma, through the builder. The builder ignores
+   * `--setup-files` and `--coverage-include` for Karma, so the hook goes in
+   * through a generated Karma config (`--runner-config`) that applies the
+   * project's own karma.conf.js when there is one, or the builder's
+   * built-in defaults when there is not (the builder applies those only
+   * when no config file is given), then adds the deeptest framework and
+   * reporter, points karma-coverage's json report at .deeptest/coverage,
+   * and turns a bare "Chrome" into "ChromeHeadless" so no window opens.
+   * The builder instruments each source file before bundling, so the
+   * counters are keyed by source path and karma-coverage's report needs no
+   * remapping. Files no test loads are absent from that report; they are
+   * instrumented here with the project's istanbul-lib-instrument to get
+   * their executable lines, all untested (see the 1.0.5 engineering notes
+   * for the two-line difference against the Vitest flavour).
+   */
+  private async runAngularKarma(ctx: RunContext): Promise<CoverageRun> {
+    const cli = angularCliBin(ctx.workspaceRoot);
+    if (!cli) {
+      throw new Error('@angular/cli is not installed. Run npm install.');
+    }
+    const { workDir, attrDir, coverageDir, hookDir, env } = this.prepareWorkDir(ctx);
+    const { extraArgs } = tsFields(ctx.settings);
+    const testsPath = ctx.settings.testsPath;
+    const posix = (p: string): string => p.split(path.sep).join('/');
+    const userConfig = detectAngularKarmaConfig(ctx.workspaceRoot);
+    const config = [
+      '// Generated by DeepTest on every run. Wraps the Karma config Angular would load; do not edit.',
+      "'use strict';",
+      "const { createRequire } = require('node:module');",
+      `const projectRequire = createRequire(${JSON.stringify(posix(ctx.workspaceRoot) + '/')});`,
+      'module.exports = function (config) {',
+      userConfig
+        ? `  require(${JSON.stringify(posix(path.join(ctx.workspaceRoot, userConfig)))})(config);`
+        : [
+            '  config.set({',
+            "    basePath: '',",
+            "    frameworks: ['jasmine'],",
+            "    plugins: ['karma-jasmine', 'karma-chrome-launcher', 'karma-coverage'].map((p) => projectRequire(p)),",
+            "    reporters: ['progress'],",
+            "    browsers: ['ChromeHeadless'],",
+            '  });',
+          ].join('\n'),
+      '  config.set({',
+      `    plugins: (config.plugins || []).concat([require(${JSON.stringify(posix(path.join(hookDir, 'karma.cjs')))})]),`,
+      "    frameworks: (config.frameworks || ['jasmine']).concat(['deeptest']),",
+      "    reporters: (config.reporters || ['progress']).filter((r) => r !== 'kjhtml').concat(['deeptest']),",
+      "    browsers: (config.browsers && config.browsers.length ? config.browsers : ['ChromeHeadless']).map((b) => (b === 'Chrome' ? 'ChromeHeadless' : b)),",
+      `    coverageReporter: { dir: ${JSON.stringify(posix(coverageDir))}, subdir: '.', reporters: [{ type: 'json' }] },`,
+      '  });',
+      '};',
+      '',
+    ].join('\n');
+    const configPath = path.join(workDir, 'karma.conf.cjs');
+    fs.writeFileSync(configPath, config, 'utf8');
+    const args = [
+      cli,
+      'test',
+      '--watch=false',
+      '--coverage',
+      ...(testsPath ? [`${testsPath}/**/*.spec.*`, `${testsPath}/**/*.test.*`].flatMap((g) => ['--include', g]) : []),
+      '--runner-config',
+      posix(path.relative(ctx.workspaceRoot, configPath)),
+      ...splitArgs(extraArgs),
+    ];
+    ctx.log(`$ node ${args.join(' ')}`);
+    const run = await runProcess('node', args, { cwd: ctx.workspaceRoot, env, log: ctx.log, signal: ctx.signal });
+    const tests = parseKarmaSummary(run.output, run.exitCode);
+    const sourceRoot = ctx.settings.sourceRoot || '';
+    const walked = walkSources(path.join(ctx.workspaceRoot, sourceRoot))
+      .map((rel) => (sourceRoot ? `${sourceRoot}/${rel}` : rel))
+      .filter((rel) => !isTestFile(rel) && !(testsPath && rel.startsWith(`${testsPath}/`)));
+    const extra = unloadedCoverages(ctx.workspaceRoot, walked, ctx.log);
+    return this.collect(ctx, 'ng-karma', coverageDir, attrDir, tests, run.exitCode, extra);
+  }
+}
+
+/**
+ * Karma's summary: the last "Executed N of M" line, with "(F FAILED)" and
+ * "(skipped S)" when they apply. A run that never executed anything (the
+ * browser did not start, the bundle did not build) has no such line and
+ * reports 0 passed with the exit code, which the runner refuses to score.
+ */
+export function parseKarmaSummary(output: string, exitCode: number | null): TestRunSummary {
+  const summary: TestRunSummary = { passed: 0, failed: 0, errors: 0, skipped: 0, exitCode };
+  const line = stripAnsi(output)
+    .split(/\r?\n/)
+    .reverse()
+    .find((l) => /Executed \d+ of \d+/.test(l));
+  if (!line) {
+    if (exitCode !== 0) {
+      summary.errors = 1;
+    }
+    return summary;
+  }
+  const executed = Number(/Executed (\d+) of/.exec(line)?.[1] ?? 0);
+  const failed = Number(/\((\d+) FAILED\)/.exec(line)?.[1] ?? 0);
+  const skipped = Number(/\(skipped (\d+)\)/.exec(line)?.[1] ?? 0);
+  summary.failed = failed;
+  summary.skipped = skipped;
+  summary.passed = Math.max(0, executed - failed);
+  if (/ERROR/.test(line) && executed === 0) {
+    summary.errors = 1;
+  }
+  return summary;
+}
+
+/**
+ * Executable lines of source files the Karma run never loaded, from the
+ * project's istanbul-lib-instrument on the TypeScript as written, with no
+ * test on any of them. The builder's own counters come from the compiled
+ * JavaScript, so a decorator or class-field line the compiler lowers into
+ * a statement is executable there and not here; nothing with a decision
+ * differs. A file the instrumenter cannot parse is logged and left out
+ * rather than guessed at.
+ */
+export function unloadedCoverages(workspaceRoot: string, relativePaths: string[], log: (line: string) => void): FileCoverage[] {
+  const instrumentDir = resolveModuleDir(workspaceRoot, 'istanbul-lib-instrument');
+  if (!instrumentDir) {
+    log('istanbul-lib-instrument is not installed, so files no test loads are missing from this report.');
+    return [];
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createInstrumenter } = require(instrumentDir) as { createInstrumenter: (o: unknown) => { instrumentSync: (code: string, file: string) => string; lastFileCoverage: () => { statementMap: Record<string, { start: { line: number } }> } } };
+  const out: FileCoverage[] = [];
+  for (const rel of relativePaths) {
+    const abs = path.join(workspaceRoot, rel);
+    try {
+      const instrumenter = createInstrumenter({
+        esModules: true,
+        parserPlugins: ['typescript', 'decorators-legacy', 'asyncGenerators', 'bigInt', 'classProperties', 'classPrivateProperties', 'dynamicImport', 'importMeta', 'numericSeparator', 'objectRestSpread', 'optionalCatchBinding', 'topLevelAwait'],
+      });
+      instrumenter.instrumentSync(fs.readFileSync(abs, 'utf8'), abs);
+      const lines = new Map<number, Set<string>>();
+      for (const stmt of Object.values(instrumenter.lastFileCoverage().statementMap)) {
+        lines.set(stmt.start.line, new Set());
+      }
+      out.push({ path: rel, lines, executed: new Set() });
+    } catch (err) {
+      log(`Could not read the executable lines of ${rel}: ${(err as Error).message.split('\n')[0]}`);
+    }
+  }
+  return out;
 }
 
 /** node_modules/@angular/cli/bin/ng.js, when the CLI is installed in the project. */

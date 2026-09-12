@@ -25,6 +25,8 @@ export interface Framework {
   configFile?: string;
   /** Angular only: the runner under the ng test builder, from angular.json. */
   angularRunner?: 'vitest' | 'karma';
+  /** Angular only: the unit-test builder DeepTest drives, or the older devkit Karma builder it does not. */
+  angularBuilder?: 'unit-test' | 'legacy-karma';
 }
 
 const CONFIG_FILES: Record<FrameworkName, string[]> = {
@@ -65,6 +67,22 @@ export function detectAngularRunner(workspaceRoot: string): 'vitest' | 'karma' |
   return undefined;
 }
 
+/** Which test builder angular.json names, or undefined when it names neither. */
+export function detectAngularBuilder(workspaceRoot: string): 'unit-test' | 'legacy-karma' | undefined {
+  const angular = readJson(path.join(workspaceRoot, 'angular.json'));
+  const projects = angular?.projects as Record<string, { architect?: Record<string, { builder?: string }> }> | undefined;
+  for (const project of Object.values(projects ?? {})) {
+    const builder = project.architect?.test?.builder;
+    if (builder === '@angular/build:unit-test') {
+      return 'unit-test';
+    }
+    if (builder === '@angular-devkit/build-angular:karma') {
+      return 'legacy-karma';
+    }
+  }
+  return undefined;
+}
+
 /** The framework, from dependencies first and config files second; undefined for a plain project. */
 export function detectFramework(workspaceRoot: string): Framework | undefined {
   const pkg = readJson(path.join(workspaceRoot, 'package.json'));
@@ -74,6 +92,7 @@ export function detectFramework(workspaceRoot: string): Framework | undefined {
     const framework: Framework = { name, major, configFile };
     if (name === 'Angular') {
       framework.angularRunner = detectAngularRunner(workspaceRoot);
+      framework.angularBuilder = detectAngularBuilder(workspaceRoot);
     }
     return framework;
   };
@@ -128,4 +147,38 @@ export function detectAngularRunnerConfig(workspaceRoot: string): string | undef
     return undefined;
   }
   return ['vitest-base.config.ts', 'vitest-base.config.mts', 'vitest-base.config.js', 'vitest-base.config.mjs'].find((f) => fs.existsSync(path.join(workspaceRoot, f)));
+}
+
+/**
+ * The Karma config the builder would load for `ng test` with Karma: the
+ * test target's `runnerConfig` when it names a file, or karma.conf.js in
+ * the project root when it is true and one exists. The builder applies its
+ * built-in defaults only when no file is given, so the generated config
+ * has to know which case it is in.
+ */
+export function detectAngularKarmaConfig(workspaceRoot: string): string | undefined {
+  const angular = readJson(path.join(workspaceRoot, 'angular.json'));
+  const projects = angular?.projects as Record<string, { root?: string; architect?: Record<string, { builder?: string; options?: { runnerConfig?: string | boolean; karmaConfig?: string } }> }> | undefined;
+  for (const project of Object.values(projects ?? {})) {
+    const test = project.architect?.test;
+    if (!test) {
+      continue;
+    }
+    if (test.builder === '@angular/build:unit-test') {
+      const setting = test.options?.runnerConfig;
+      if (typeof setting === 'string') {
+        return fs.existsSync(path.join(workspaceRoot, setting)) ? setting : undefined;
+      }
+      if (setting === true) {
+        const candidate = path.join(project.root ?? '', 'karma.conf.js').split(path.sep).join('/');
+        return fs.existsSync(path.join(workspaceRoot, candidate)) ? candidate : undefined;
+      }
+      return undefined;
+    }
+    if (test.builder === '@angular-devkit/build-angular:karma') {
+      const setting = test.options?.karmaConfig;
+      return typeof setting === 'string' && fs.existsSync(path.join(workspaceRoot, setting)) ? setting : undefined;
+    }
+  }
+  return undefined;
 }

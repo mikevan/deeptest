@@ -961,3 +961,79 @@ holds on Angular. Tests: two new in DeepTest (the runner config
 detection; the hook mapping a chunk's counters back to a source file,
 and leaving an on-disk key alone) and the Angular environment test
 rewritten for the two flavours, 193 in all; one new in UntangleIt (15).
+
+## Angular with Karma, through the builder (1.0.5)
+
+Finding 3 of the 1.0 survey, closed for the Karma flavour, and the last
+runner in 1.0 that needed a hook written from scratch.
+
+Getting in. The builder ignores `--setup-files` and `--coverage-include`
+for Karma (it says so on the console), so the only door is
+`--runner-config`, a Karma config file. The generated
+`.deeptest/karma.conf.cjs` applies the project's own karma.conf.js when
+the test target names one (`runnerConfig` as a path, or `true` with a
+karma.conf.js in the project root), and otherwise the same defaults the
+builder would have used, because the builder applies its built-in config
+only when no file is given (`getBaseKarmaOptions` in
+@angular/build/src/builders/karma/karma-config.js). It then appends the
+deeptest plugin, framework, and reporter, points karma-coverage's json
+report at .deeptest/coverage, drops the kjhtml reporter, and turns a bare
+"Chrome" into "ChromeHeadless" so a check never opens a window. A custom
+launcher the project defines is kept as it is.
+
+The hook, in two halves. `hooks/karma-client.js` runs in the browser as a
+classic script after Jasmine (the deeptest framework appends it to Karma's
+file list; Jasmine's own framework unshifts its files to the front, and
+the spec bundles are ES modules, which the browser defers, so the client
+always loads between the two). It registers a Jasmine reporter,
+snapshots `window.__coverage__` counters on `specStarted`, diffs them on
+`specDone`, and sends the statement ids that rose to the server with
+`__karma__.info`, along with each file's statementMap and inputSourceMap
+the first time that file appears. `hooks/karma.cjs` runs in the Karma
+server (Node), listens for `browser_info`, maps every statement through
+attribution.cjs's `originalPosition`, and writes the same jsonl the other
+hooks write. One mapping function for four runners. The test id is
+`<spec file>::<Jasmine fullName>`; Jasmine 4 and later report the file a
+spec was defined in, and through Karma that is a URL under `/base/`,
+which the client strips.
+
+Why the counters need no chunk mapping here. The builder instruments each
+source file before bundling for Karma (the coverage babel plugin in
+javascript-transformer-worker.js), so `__coverage__` is keyed by source
+path, and the inputSourceMap only moves a line from the compiled
+JavaScript back to the TypeScript. `originalPosition` sees a key that is
+on disk and does exactly that.
+
+Files no test loads. karma-coverage reports only the files the bundle
+loaded, and the builder ignores `--coverage-include`, so the villain would
+vanish, the falsely-clean report the survey found for Vue. The driver
+walks the source root after the run and instruments every source file
+the report lacks with the project's own istanbul-lib-instrument (the
+builder itself requires it for coverage) on the TypeScript as written,
+with `typescript` and `decorators-legacy` parser plugins, to get its
+executable lines, all untested. The universe differs from the builder's
+by the lines the compiler lowers into statements: a decorator or a class
+field (`schedule.service.ts` lines 10 and 11, `app.ts` lines 4 and 9
+under the Vitest flavour, absent here). No line with a decision differs,
+and every such file is entirely untested either way, so the verdict is
+the same; the coverage percentage moves by under a point (25.61% under
+Vitest, 26.19% under Karma on the same program). A file the instrumenter
+cannot parse is logged by name and left out. The alternative, an
+import-everything spec so the bundle loads every file, was rejected:
+importing main.ts bootstraps the application.
+
+The older builder. `@angular-devkit/build-angular:karma` takes different
+flags and has no fixture, so a project on it is refused with the reason
+and the `ng update` path; `detectAngularBuilder` tells the two apart.
+
+Verified on angular-karma with the plugin compiled from this tree and a
+headless Chromium 141 in the harness (Playwright's headless shell, carried
+into the linked machine's VM in six pieces because that VM cannot fetch
+a browser): 11 passed, attribution on 22 lines, `pickGreeting` first at
+27/73/97, coverage 26.19%; greet.ts carries exactly the per-line test
+counts the Vitest and React ports do. UntangleIt runs Karma projects
+through `ng test --watch=false --browsers ChromeHeadless` and parses
+Karma's summary. Tests: three new in DeepTest (the Karma summary parser,
+the Karma config detection with both builders, and the unloaded-file
+universe on the fixture's villain) and the Angular environment test
+rewritten, 196 in all; UntangleIt's Angular test extended (15).

@@ -1,6 +1,6 @@
 # DeepTest: build status and run instructions
 
-Updated 2026-09-12 (1.0.4, in the tree). Companion to vscode-density-extension-spec.md.
+Updated 2026-09-12 (1.0.5, in the tree). Companion to vscode-density-extension-spec.md.
 Source tree and VSIX live at C:\workspace\DeepTest on Michael's machine. The
 authoritative copy of this file is docs/build-status.md in that tree.
 Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
@@ -14,6 +14,26 @@ and every extension is tagged 1.0.0 together (DeepTest, UntangleIt, the
 pack, and the library). From here the minor number moves once per language
 across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
 numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
+
+## 2026-09-12, 1.0.5: Angular with Karma runs through the builder
+
+- Runner ng-karma: `ng test --watch=false --coverage --runner-config
+  .deeptest/karma.conf.cjs`; the generated config wraps the project's
+  karma.conf.js or the builder's defaults, adds the deeptest framework and
+  reporter (hooks/karma.cjs, hooks/karma-client.js), runs Chrome headless.
+- Per-test attribution through a Jasmine reporter in the browser and
+  __karma__.info to the server; one mapping function for every runner.
+- Files no test loads are instrumented with the project's
+  istanbul-lib-instrument for their executable lines (all untested).
+- The older @angular-devkit/build-angular:karma builder is refused with
+  the reason. UntangleIt runs Karma projects headless.
+- Tests: 196 in DeepTest (three new, one rewritten), 15 in UntangleIt.
+- Needs Chrome on the machine (karma-chrome-launcher finds it).
+- Verify on HelloWorlds\angular-karma in VS Code: the setup screen says
+  "Framework: Angular 22, tests through ng test with Karma."; "Check my
+  code" reports 11 tests passed, no browser window opens, pickGreeting()
+  is first with 27 ways through, src/app/greet.ts line 4 shows 6 tests.
+  Before 1.0.5 the run was refused.
 
 ## 2026-09-12, 1.0.4: Angular with Vitest runs through the builder
 
