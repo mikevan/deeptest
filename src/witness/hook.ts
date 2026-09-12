@@ -10,7 +10,7 @@ import { createParser, initTreeSitter } from '../languages/shared/treeSitter';
 import { Instrumenter, Instrumented, WitnessMaps } from './instrument';
 
 export interface WitnessInstrumenter {
-  instrument(filePath: string, source: string): Instrumented;
+  instrument(filePath: string, source: string, embedMaps?: boolean): Instrumented;
   mapsOnly(filePath: string, source: string): WitnessMaps;
 }
 
@@ -25,7 +25,7 @@ export async function createInstrumenter(wasmDir: string): Promise<WitnessInstru
     return ext === '.tsx' ? tsx : ext === '.ts' || ext === '.mts' || ext === '.cts' ? typescript : javascript;
   };
   return {
-    instrument: (filePath, source) => pick(filePath).instrument(filePath, source),
+    instrument: (filePath, source, embedMaps = false) => pick(filePath).instrument(filePath, source, embedMaps),
     mapsOnly: (filePath, source) => pick(filePath).mapsOnly(filePath, source),
   };
 }

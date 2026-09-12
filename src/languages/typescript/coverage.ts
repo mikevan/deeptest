@@ -35,7 +35,7 @@ import { runtimeEnvironment } from '../shared/runtime';
  * because an Angular project's tests need the Angular compiler and
  * TestBed that only the builder provides (1.0 survey, finding 3a).
  */
-export type Runner = 'jest' | 'vitest' | 'ng-vitest' | 'ng-karma' | 'mocha';
+export type Runner = 'jest' | 'vitest' | 'ng-vitest' | 'ng-karma' | 'mocha' | 'playwright-ct';
 
 export interface TsFields {
   runner: 'auto' | Runner;
@@ -298,6 +298,9 @@ export class TypeScriptCoverageSource implements CoverageSource {
     if (framework?.name === 'Angular' && framework.angularRunner && framework.angularBuilder === 'unit-test') {
       return framework.angularRunner === 'karma' ? 'ng-karma' : 'ng-vitest';
     }
+    if (detectPlaywrightCt(workspaceRoot)) {
+      return 'playwright-ct';
+    }
     return detectRunner(workspaceRoot);
   }
 
@@ -338,6 +341,9 @@ export class TypeScriptCoverageSource implements CoverageSource {
     }
     if (runner === 'mocha') {
       return this.checkMochaEnvironment(ctx.workspaceRoot, nodeVersion);
+    }
+    if (runner === 'playwright-ct') {
+      return this.checkPlaywrightEnvironment(ctx.workspaceRoot, nodeVersion, ctx.settings);
     }
     if (!runner) {
       return {
@@ -522,6 +528,90 @@ export class TypeScriptCoverageSource implements CoverageSource {
     return this.collect(ctx, 'mocha', coverageDir, attrDir, tests, run.exitCode, extra);
   }
 
+  /**
+   * Playwright component tests. Witness instruments the component build
+   * through a Vite plugin the wrapper config adds, and the page reports to
+   * the Witness runtime the same plugin injects, so nothing is installed
+   * in the project. Playwright runs code inside a test's worker only
+   * through a fixture a test file imports (Playwright, "Fixtures"), so per
+   * test attribution needs one line in each component test: import `test`
+   * and `expect` from .deeptest/witness-playwright.ts instead of the
+   * Playwright package. DeepTest writes that file and never edits a test.
+   */
+  private checkPlaywrightEnvironment(workspaceRoot: string, nodeVersion: string, settings: LanguageSettings): EnvironmentCheck {
+    const ct = detectPlaywrightCt(workspaceRoot)!;
+    if (!resolveModuleDir(workspaceRoot, '@playwright/test') || !resolveModuleDir(workspaceRoot, ct.package)) {
+      return {
+        ok: false,
+        summary: `Node ${nodeVersion}, Playwright not installed`,
+        problems: [`${ct.package} is listed in package.json but is not installed under node_modules. Run npm install.`],
+        fix: { title: 'Run npm install', command: 'npm', args: ['install'] },
+      };
+    }
+    writePlaywrightFixture(workspaceRoot, ct.package);
+    const importing = playwrightTestsImportingFixture(workspaceRoot, settings);
+    if (importing.total === 0) {
+      return { ok: false, summary: `Node ${nodeVersion}, Playwright component tests`, problems: [`No component test was found (${ct.configFile ?? 'no playwright-ct config'}).`] };
+    }
+    if (importing.withFixture === 0) {
+      return {
+        ok: false,
+        summary: `Node ${nodeVersion}, Playwright component tests, fixture not imported`,
+        problems: [
+          `Playwright runs code inside a test only through a fixture the test imports, so DeepTest cannot attribute lines to tests until each component test imports its fixture. DeepTest wrote .deeptest/witness-playwright.ts; in each of the ${importing.total} component test files change the import of test and expect from "${ct.package}" to that file (for example: import { test, expect } from '${importing.exampleImport}';) and commit the file with your tests. Nothing needs installing.`,
+        ],
+      };
+    }
+    const partial = importing.withFixture < importing.total ? ` ${importing.total - importing.withFixture} of ${importing.total} component test files do not import the fixture yet; their tests run but are not attributed.` : '';
+    return { ok: true, summary: `Node ${nodeVersion}, Playwright component tests through Witness`, problems: partial ? [partial.trim()] : [] };
+  }
+
+  private async runPlaywrightCt(ctx: RunContext): Promise<CoverageRun> {
+    const ct = detectPlaywrightCt(ctx.workspaceRoot);
+    // The component-testing package's own cli.js: it is what `npx playwright`
+    // resolves to in such a project, and it registers the component plugin.
+    // @playwright/test's cli.js can carry a second copy of the runner, and
+    // two copies means "Playwright Test did not expect test() to be called here".
+    const cli = ct ? resolveModuleDir(ctx.workspaceRoot, ct.package) : undefined;
+    if (!ct || !cli) {
+      throw new Error('Playwright component tests are not installed. Run npm install.');
+    }
+    if (!ct.configFile) {
+      throw new Error('No playwright-ct config file was found at the workspace root.');
+    }
+    const { workDir, attrDir, coverageDir, hookDir, env } = this.prepareWorkDir(ctx);
+    writePlaywrightFixture(ctx.workspaceRoot, ct.package);
+    const { extraArgs } = tsFields(ctx.settings);
+    const sourceRoot = path.join(ctx.workspaceRoot, ctx.settings.sourceRoot || '');
+    const wrapperPath = path.join(workDir, 'playwright-ct.config.mjs');
+    fs.writeFileSync(wrapperPath, playwrightWrapperConfig(ctx.workspaceRoot, ct.configFile), 'utf8');
+    fs.rmSync(path.join(workDir, 'playwright-cache'), { recursive: true, force: true });
+    // Only the page is measured. Playwright's own loader transforms what a
+    // test imports in the worker and short-circuits every other loader, so
+    // a function a test calls in Node, not in the page, is not counted; the
+    // setup screen says so (docs/witness.md, "Not yet").
+    const witnessEnv = {
+      ...env,
+      DEEPTEST_WASM_DIR: this.options.wasmDir ?? runtimeEnvironment().wasmDir,
+      DEEPTEST_SOURCE_ROOT: sourceRoot,
+      DEEPTEST_HOOKS_DIR: hookDir,
+    };
+    const args = [path.join(cli, 'cli.js'), 'test', '-c', wrapperPath, ...splitArgs(extraArgs)];
+    ctx.log(`$ node ${args.join(' ')}`);
+    const run = await runProcess('node', args, { cwd: ctx.workspaceRoot, env: witnessEnv, log: ctx.log, signal: ctx.signal });
+    if (/Executable doesn't exist|playwright install/.test(run.output) && run.exitCode !== 0) {
+      throw new Error('Playwright has no browser installed for this project. Run "npx playwright install chromium" in the project, then check again.');
+    }
+    const tests = parsePlaywrightSummary(run.output, run.exitCode);
+    mergePlaywrightRecords(attrDir, coverageDir);
+    const relSourceRoot = ctx.settings.sourceRoot || '';
+    const walked = walkSources(sourceRoot)
+      .map((rel) => (relSourceRoot ? `${relSourceRoot}/${rel}` : rel))
+      .filter((rel) => !isTestFile(rel) && !/\.ct\.[cm]?[jt]sx?$/.test(rel));
+    const extra = await witnessUniverse(ctx.workspaceRoot, walked, this.options.wasmDir ?? runtimeEnvironment().wasmDir, ctx.log);
+    return this.collect(ctx, 'playwright-ct', coverageDir, attrDir, tests, run.exitCode, extra);
+  }
+
   async run(ctx: RunContext): Promise<CoverageRun> {
     const runner = this.runnerFor(ctx.workspaceRoot, ctx.settings);
     if (!runner) {
@@ -535,6 +625,9 @@ export class TypeScriptCoverageSource implements CoverageSource {
     }
     if (runner === 'mocha') {
       return this.runMocha(ctx);
+    }
+    if (runner === 'playwright-ct') {
+      return this.runPlaywrightCt(ctx);
     }
     const { workDir, attrDir, coverageDir, hookDir, env } = this.prepareWorkDir(ctx);
     const { extraArgs } = tsFields(ctx.settings);
@@ -654,7 +747,7 @@ export class TypeScriptCoverageSource implements CoverageSource {
     // environment so a bundling runner cannot break the path.
     const hookDir = path.join(workDir, 'hooks');
     fs.mkdirSync(hookDir, { recursive: true });
-    for (const file of ['vitest.mjs', 'attribution.cjs', 'karma.cjs', 'karma-client.js', 'witness.cjs', 'witness-loader.mjs', 'witness-instrument.cjs', 'mocha.cjs']) {
+    for (const file of ['vitest.mjs', 'attribution.cjs', 'karma.cjs', 'karma-client.js', 'witness.cjs', 'witness-loader.mjs', 'witness-instrument.cjs', 'witness-vite.mjs', 'mocha.cjs']) {
       const from = path.join(this.options.hooksDir, file);
       if (fs.existsSync(from)) {
         fs.copyFileSync(from, path.join(hookDir, file));
@@ -667,8 +760,9 @@ export class TypeScriptCoverageSource implements CoverageSource {
 
   private collect(ctx: RunContext, runner: Runner, coverageDir: string, attrDir: string, tests: TestRunSummary, exitCode: number | null, extra: FileCoverage[] = []): CoverageRun {
     const finalJson = path.join(coverageDir, 'coverage-final.json');
+    mergeWitnessReports(coverageDir);
     if (!fs.existsSync(finalJson)) {
-      throw new Error(`${runner === 'ng-vitest' || runner === 'ng-karma' ? 'ng test' : runner === 'mocha' ? 'mocha under Witness' : runner} produced no coverage, and ended with exit code ${exitCode}. Press "Show the log" to see the test run.`);
+      throw new Error(`${runner === 'ng-vitest' || runner === 'ng-karma' ? 'ng test' : runner === 'mocha' ? 'mocha under Witness' : runner === 'playwright-ct' ? 'Playwright under Witness' : runner} produced no coverage, and ended with exit code ${exitCode}. Press "Show the log" to see the test run.`);
     }
     const attribution: string[] = [];
     for (const file of fs.readdirSync(attrDir)) {
@@ -970,4 +1064,201 @@ export async function witnessUniverse(workspaceRoot: string, relativePaths: stri
     }
   }
   return out;
+}
+
+const PLAYWRIGHT_CT_PACKAGES = ['@playwright/experimental-ct-react', '@playwright/experimental-ct-vue', '@playwright/experimental-ct-svelte', '@playwright/experimental-ct-solid', '@playwright/experimental-ct-react17'];
+const PLAYWRIGHT_CT_CONFIGS = ['playwright-ct.config.ts', 'playwright-ct.config.mts', 'playwright-ct.config.js', 'playwright-ct.config.mjs', 'playwright-ct.config.cjs'];
+
+/** The Playwright component-testing package the project uses, and its config file, or undefined. */
+export function detectPlaywrightCt(workspaceRoot: string): { package: string; configFile?: string } | undefined {
+  const pkg = readPackageJson(workspaceRoot);
+  const found = PLAYWRIGHT_CT_PACKAGES.find((p) => Boolean(pkg?.deps[p]));
+  if (!found) {
+    return undefined;
+  }
+  return { package: found, configFile: PLAYWRIGHT_CT_CONFIGS.find((f) => fs.existsSync(path.join(workspaceRoot, f))) };
+}
+
+/** Writes .deeptest/witness-playwright.ts for the project's package. Stable content, so committing it beside the tests is safe. */
+export function writePlaywrightFixture(workspaceRoot: string, ctPackage: string): string {
+  const template = fs.readFileSync(path.join(runtimeEnvironment().hooksDir, 'witness-playwright.template.ts'), 'utf8');
+  const dir = path.join(workspaceRoot, '.deeptest');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'witness-playwright.ts');
+  const content = template.split('__PACKAGE__').join(ctPackage);
+  if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== content) {
+    fs.writeFileSync(file, content, 'utf8');
+  }
+  return file;
+}
+
+/** Component test files under the tests folder (or the whole workspace), and how many import the fixture. */
+export function playwrightTestsImportingFixture(workspaceRoot: string, settings: LanguageSettings): { total: number; withFixture: number; exampleImport: string } {
+  const root = path.join(workspaceRoot, settings.testsPath || '');
+  const files = walkSources(root)
+    .map((rel) => (settings.testsPath ? `${settings.testsPath}/${rel}` : rel))
+    .filter((rel) => isTestFile(rel) || /\.ct\.[cm]?[jt]sx?$/.test(rel));
+  let withFixture = 0;
+  let example = '';
+  for (const rel of files) {
+    const text = fs.readFileSync(path.join(workspaceRoot, rel), 'utf8');
+    if (/witness-playwright/.test(text)) {
+      withFixture += 1;
+    } else if (!example) {
+      example = path.relative(path.dirname(path.join(workspaceRoot, rel)), path.join(workspaceRoot, '.deeptest', 'witness-playwright')).split(path.sep).join('/');
+      if (!example.startsWith('.')) {
+        example = `./${example}`;
+      }
+    }
+  }
+  return { total: files.length, withFixture, exampleImport: example || './.deeptest/witness-playwright' };
+}
+
+/** The wrapper config: the project's own config with the Witness Vite plugin added and its relative paths re-rooted. */
+export function playwrightWrapperConfig(workspaceRoot: string, configFile: string): string {
+  const baseUrl = pathToFileURL(path.join(workspaceRoot, configFile)).href;
+  return [
+    '// Generated by DeepTest on every run. Wraps the project\'s Playwright config; do not edit.',
+    `import base from ${JSON.stringify(baseUrl)};`,
+    "import { witnessPlugin } from './hooks/witness-vite.mjs';",
+    "import * as path from 'node:path';",
+    "import { fileURLToPath } from 'node:url';",
+    "const here = path.dirname(fileURLToPath(import.meta.url));",
+    `const projectRoot = ${JSON.stringify(workspaceRoot)};`,
+    "const abs = (p) => (typeof p === 'string' && !path.isAbsolute(p) ? path.resolve(projectRoot, p) : p);",
+    "const plugin = witnessPlugin({ hooksDir: path.join(here, 'hooks'), wasmDir: process.env.DEEPTEST_WASM_DIR, sourceRoot: process.env.DEEPTEST_SOURCE_ROOT });",
+    'function withWitness(use) {',
+    "  // Playwright joins ctTemplateDir onto the config's own folder with path.join, so it stays relative to .deeptest/.",
+    "  // Playwright reuses a built bundle when its sources and dependencies are unchanged, config included, so the Witness build lives in its own cache folder, emptied before every run.",
+    "  use = { ...use, ctTemplateDir: path.relative(here, abs(use?.ctTemplateDir ?? 'playwright')), ctCacheDir: path.join(here, 'playwright-cache') };",
+    '  const vite = use.ctViteConfig;',
+    "  if (typeof vite === 'function') {",
+    '    return { ...use, ctViteConfig: async (...args) => { const c = await vite(...args); return { ...c, plugins: [...(c?.plugins ?? []), plugin] }; } };',
+    '  }',
+    '  return { ...use, ctViteConfig: { ...(vite ?? {}), plugins: [...(vite?.plugins ?? []), plugin] } };',
+    '}',
+    "const config = { ...base, use: withWitness(base.use), testDir: abs(base.testDir ?? '.'), outputDir: abs(base.outputDir ?? 'test-results') };",
+    "for (const k of ['snapshotDir', 'globalSetup', 'globalTeardown']) { if (base[k] !== undefined) { config[k] = abs(base[k]); } }",
+    'if (Array.isArray(base.projects)) {',
+    '  config.projects = base.projects.map((p) => ({ ...p, ...(p.testDir ? { testDir: abs(p.testDir) } : {}), ...(p.use ? { use: withWitness(p.use) } : {}) }));',
+    '}',
+    'export default config;',
+    '',
+  ].join('\n');
+}
+
+/** Playwright's summary: "2 passed (2.6s)", "1 failed", "1 flaky", "1 skipped", "1 did not run". */
+export function parsePlaywrightSummary(output: string, exitCode: number | null): TestRunSummary {
+  const summary: TestRunSummary = { passed: 0, failed: 0, errors: 0, skipped: 0, exitCode };
+  const text = stripAnsi(output);
+  const grab = (word: string): number => {
+    const m = new RegExp(`(\\d+) ${word}`).exec(text);
+    return m ? Number(m[1]) : 0;
+  };
+  summary.passed = grab('passed') + grab('flaky');
+  summary.failed = grab('failed');
+  summary.skipped = grab('skipped') + grab('did not run');
+  if (summary.passed + summary.failed + summary.skipped === 0 && exitCode !== 0) {
+    summary.errors = 1;
+  }
+  return summary;
+}
+
+/**
+ * The fixture writes one line per test holding that test's whole page
+ * counters. The per-test attribution comes from them (the lines, decision
+ * outcomes, and functions with a count above zero), and the whole-run
+ * report is their sum.
+ */
+export function mergePlaywrightRecords(attrDir: string, coverageDir: string): void {
+  type Cov = { path: string; statementMap: Record<string, { start: { line: number } }>; fnMap: Record<string, unknown>; branchMap: Record<string, unknown>; s: Record<string, number>; f: Record<string, number>; b: Record<string, number[]> };
+  const merged: Record<string, Cov> = {};
+  const attribution: string[] = [];
+  for (const file of fs.existsSync(attrDir) ? fs.readdirSync(attrDir) : []) {
+    if (!/^coverage-pw-.*\.pwcov$/.test(file)) {
+      continue;
+    }
+    for (const line of fs.readFileSync(path.join(attrDir, file), 'utf8').split(/\r?\n/)) {
+      if (!line.trim()) {
+        continue;
+      }
+      const record = JSON.parse(line) as { test: string; coverage: Record<string, Cov> };
+      const files: Record<string, number[]> = {};
+      const outcomes: Record<string, Record<string, number[]>> = {};
+      const entered: Record<string, number[]> = {};
+      for (const [filePath, cov] of Object.entries(record.coverage)) {
+        const lines = new Set<number>();
+        for (const [id, count] of Object.entries(cov.s)) {
+          if (count > 0) {
+            lines.add(cov.statementMap[id].start.line);
+          }
+        }
+        if (lines.size > 0) {
+          files[filePath] = Array.from(lines).sort((a, b) => a - b);
+        }
+        for (const [id, counts] of Object.entries(cov.b)) {
+          const taken = counts.map((c, i) => (c > 0 ? i : -1)).filter((i) => i >= 0);
+          if (taken.length > 0) {
+            (outcomes[filePath] ??= {})[id] = taken;
+          }
+        }
+        const fns = Object.entries(cov.f).filter(([, c]) => c > 0).map(([id]) => Number(id));
+        if (fns.length > 0) {
+          entered[filePath] = fns;
+        }
+        const target = merged[filePath] ?? (merged[filePath] = { ...cov, s: {}, f: {}, b: {} });
+        for (const [id, count] of Object.entries(cov.s)) {
+          target.s[id] = (target.s[id] ?? 0) + count;
+        }
+        for (const [id, count] of Object.entries(cov.f)) {
+          target.f[id] = (target.f[id] ?? 0) + count;
+        }
+        for (const [id, counts] of Object.entries(cov.b)) {
+          target.b[id] = counts.map((c, i) => (target.b[id]?.[i] ?? 0) + c);
+        }
+      }
+      attribution.push(JSON.stringify({ test: record.test, files, outcomes, entered }));
+    }
+  }
+  fs.mkdirSync(coverageDir, { recursive: true });
+  // One more per-process report for mergeWitnessReports to sum with the workers' own.
+  fs.writeFileSync(path.join(coverageDir, 'coverage-page.json'), JSON.stringify(merged));
+  if (attribution.length > 0) {
+    fs.writeFileSync(path.join(attrDir, 'attr-witness-playwright.jsonl'), `${attribution.join('\n')}\n`);
+  }
+}
+
+/**
+ * Witness writes one Istanbul-shaped report per process (coverage-<pid>.json,
+ * coverage-page.json). When no runner wrote coverage-final.json itself, this
+ * sums them into one: the same file measured in two processes (a worker and
+ * a page, or two workers) adds its counts.
+ */
+export function mergeWitnessReports(coverageDir: string): void {
+  const finalJson = path.join(coverageDir, 'coverage-final.json');
+  if (fs.existsSync(finalJson) || !fs.existsSync(coverageDir)) {
+    return;
+  }
+  type Cov = { path: string; statementMap: Record<string, unknown>; fnMap: Record<string, unknown>; branchMap: Record<string, unknown>; s: Record<string, number>; f: Record<string, number>; b: Record<string, number[]> };
+  const parts = fs.readdirSync(coverageDir).filter((f) => /^coverage-.*\.json$/.test(f));
+  if (parts.length === 0) {
+    return;
+  }
+  const merged: Record<string, Cov> = {};
+  for (const part of parts) {
+    const report = JSON.parse(fs.readFileSync(path.join(coverageDir, part), 'utf8')) as Record<string, Cov>;
+    for (const [filePath, cov] of Object.entries(report)) {
+      const target = merged[filePath] ?? (merged[filePath] = { ...cov, s: {}, f: {}, b: {} });
+      for (const [id, count] of Object.entries(cov.s)) {
+        target.s[id] = (target.s[id] ?? 0) + count;
+      }
+      for (const [id, count] of Object.entries(cov.f)) {
+        target.f[id] = (target.f[id] ?? 0) + count;
+      }
+      for (const [id, counts] of Object.entries(cov.b)) {
+        target.b[id] = counts.map((c, i) => (target.b[id]?.[i] ?? 0) + c);
+      }
+    }
+  }
+  fs.writeFileSync(finalJson, JSON.stringify(merged));
 }

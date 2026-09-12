@@ -24,7 +24,21 @@ const source = fromIndex >= 0 ? resolve(args[fromIndex + 1]) : resolve(here, '..
 const names = args.filter((a, i) => a !== '--from' && a !== '--all' && (fromIndex < 0 || i !== fromIndex + 1));
 const all = args.includes('--all');
 
-const SKIP = new Set(['node_modules', '.venv', '.keepsafe', '.untangleit', '.deeptest', 'dist', 'coverage', '.angular', '__pycache__', '.pytest_cache', '.git', '_to_delete', '.vscode']);
+const SKIP = new Set(['node_modules', '.venv', '.keepsafe', '.untangleit', 'dist', 'coverage', '.angular', '__pycache__', '.pytest_cache', '.git', '_to_delete', '.vscode', 'test-results']);
+// Inside .deeptest/ only what travels with the code: the decisions, and the Playwright fixture the specs import.
+const KEEP_IN_DEEPTEST = new Set(['decisions.json', 'witness-playwright.ts']);
+function wanted(p) {
+  const parts = p.split(/[\\/]/);
+  const name = parts[parts.length - 1];
+  if (SKIP.has(name)) {
+    return false;
+  }
+  const at = parts.lastIndexOf('.deeptest');
+  if (at >= 0 && at < parts.length - 1) {
+    return parts.length === at + 2 && KEEP_IN_DEEPTEST.has(name);
+  }
+  return true;
+}
 
 if (!existsSync(source)) {
   console.error(`HelloWorlds not found at ${source}. Pass --from <path>.`);
@@ -45,7 +59,7 @@ for (const port of ports) {
   }
   const to = join(fixtures, `helloworld-${port}`);
   rmSync(to, { recursive: true, force: true });
-  cpSync(from, to, { recursive: true, filter: (p) => !SKIP.has(p.split(/[\\/]/).pop()) });
+  cpSync(from, to, { recursive: true, filter: (p) => wanted(p) });
   const files = countFiles(to);
   console.log(`${port} -> test/fixtures/helloworld-${port} (${files} files)`);
 }

@@ -90,7 +90,8 @@ const STATEMENT_TYPES = new Set([
 const FUNCTION_TYPES = new Set(['function_declaration', 'function_expression', 'function', 'generator_function', 'generator_function_declaration', 'arrow_function', 'method_definition']);
 const LOGICAL = new Set(['&&', '||', '??']);
 export const MISPARSE = 'the grammar reads a non-null assertion (x!) after a logical operator as covering the whole run, so the operands cannot be told apart; the statement is counted, the decision is not';
-const LOGICAL_ASSIGNMENT = new Set(['&&=', '||=', '??=']);
+// Logical assignment (a ??= b) is a decision to the structure analysis but not
+// a branch to istanbul-lib-instrument 6, so the Istanbul view leaves it out too.
 const WRAPPING_BODIES: Array<[string, string[]]> = [
   ['if_statement', ['consequence']],
   ['for_statement', ['body']],
@@ -167,8 +168,13 @@ export class Instrumenter {
 
   constructor(private readonly parser: Parser) {}
 
-  /** Instruments `source` for the file at `filePath` (absolute, forward slashes). */
-  instrument(filePath: string, source: string): Instrumented {
+  /**
+   * Instruments `source` for the file at `filePath` (absolute, forward
+   * slashes). With `embedMaps`, the file's prologue carries its own maps,
+   * for a runtime that cannot be told about the file any other way (a
+   * browser page); without it the loader registers the maps in-thread.
+   */
+  instrument(filePath: string, source: string, embedMaps = false): Instrumented {
     this.edits = [];
     this.statements = [];
     this.functions = [];
@@ -185,17 +191,17 @@ export class Instrumenter {
     if (!tree) {
       throw new Error(`Witness could not parse ${filePath}`);
     }
+    const maps: WitnessMaps = { path: filePath, statementMap: {}, fnMap: {}, branchMap: {}, skipped: this.skipped };
     try {
       this.visit(tree.rootNode);
-      this.prologue(tree.rootNode, blanked);
+      this.statements.forEach((s, i) => (maps.statementMap[String(i)] = s));
+      this.functions.forEach((f, i) => (maps.fnMap[String(i)] = f));
+      this.branches.forEach((b, i) => (maps.branchMap[String(i)] = b));
+      this.prologue(tree.rootNode, blanked, embedMaps ? maps : undefined);
     } finally {
       tree.delete();
     }
     const code = this.apply(blanked);
-    const maps: WitnessMaps = { path: filePath, statementMap: {}, fnMap: {}, branchMap: {}, skipped: this.skipped };
-    this.statements.forEach((s, i) => (maps.statementMap[String(i)] = s));
-    this.functions.forEach((f, i) => (maps.fnMap[String(i)] = f));
-    this.branches.forEach((b, i) => (maps.branchMap[String(i)] = b));
     return { code, maps, handle: this.handle };
   }
 
@@ -256,8 +262,8 @@ export class Instrumenter {
     return out + source.slice(cursor);
   }
 
-  /** `const W = globalThis.__witness__.file("<id>");` after any shebang and directive prologue. */
-  private prologue(root: Node, source: string): void {
+  /** `const W = globalThis.__witness__.file("<id>"[, maps]);` after any shebang and directive prologue. */
+  private prologue(root: Node, source: string, maps?: WitnessMaps): void {
     let at = 0;
     if (source.startsWith('#!')) {
       at = source.indexOf('\n') + 1;
@@ -272,7 +278,8 @@ export class Instrumenter {
       }
       at = child.endIndex;
     }
-    this.insert(at, `const ${this.handle} = globalThis.__witness__.file(${JSON.stringify(this.handle)});`, 0);
+    const embedded = maps ? `, ${JSON.stringify({ path: maps.path, statementMap: maps.statementMap, fnMap: maps.fnMap, branchMap: maps.branchMap })}` : '';
+    this.insert(at, `const ${this.handle} = globalThis.__witness__.file(${JSON.stringify(this.handle)}${embedded});`, 0);
   }
 
   // ---- counters ----
@@ -404,15 +411,14 @@ export class Instrumenter {
           operands.forEach((o, i) => this.wrapOperand(id, i, o));
         }
       }
-    } else if (type === 'augmented_assignment_expression' && LOGICAL_ASSIGNMENT.has(node.childForFieldName('operator')?.text ?? '')) {
-      const right = node.childForFieldName('right')!;
-      const id = this.branch('binary-expr', node, [loc(right)]);
-      this.wrapOperand(id, 0, right);
     } else if ((type === 'required_parameter' || type === 'optional_parameter') && node.childForFieldName('value')) {
       const value = node.childForFieldName('value')!;
       const id = this.branch('default-arg', node, [loc(value)]);
       this.wrapOperand(id, 0, value);
-    } else if (type === 'assignment_pattern' && node.parent?.type === 'formal_parameters') {
+    } else if (type === 'assignment_pattern' || type === 'object_assignment_pattern') {
+      // A default anywhere a pattern can carry one: a parameter, a
+      // destructured parameter, or a destructuring declaration in a body.
+      // Istanbul counts them all as default-arg branches.
       const value = node.childForFieldName('right')!;
       const id = this.branch('default-arg', node, [loc(value)]);
       this.wrapOperand(id, 0, value);

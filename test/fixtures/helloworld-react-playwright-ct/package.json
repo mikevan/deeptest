@@ -1,0 +1,23 @@
+{
+  "name": "helloworld-react-playwright-ct",
+  "private": true,
+  "version": "1.0.0",
+  "description": "HelloWorld for DeepTest and UntangleIt: React, TypeScript, Playwright component tests. Measured by Witness in the page; no coverage package. Same functions, same villain as the Python original, tested through components.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test -c playwright-ct.config.ts"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@playwright/experimental-ct-react": "^1.62.1",
+    "@playwright/test": "^1.62.1",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^6.1.0",
+    "typescript": "^5.8.0",
+    "vite": "^8.0.0"
+  }
+}

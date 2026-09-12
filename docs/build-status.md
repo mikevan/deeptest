@@ -1,6 +1,6 @@
 # DeepTest: build status and run instructions
 
-Updated 2026-09-12 (1.0.6, in the tree). Companion to vscode-density-extension-spec.md.
+Updated 2026-09-12 (1.0.7, in the tree). Companion to vscode-density-extension-spec.md.
 Source tree and VSIX live at C:\workspace\DeepTest on Michael's machine. The
 authoritative copy of this file is docs/build-status.md in that tree.
 Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
@@ -14,6 +14,25 @@ and every extension is tagged 1.0.0 together (DeepTest, UntangleIt, the
 pack, and the library). From here the minor number moves once per language
 across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
 numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
+
+## 2026-09-12, 1.0.7: Playwright component tests through Witness in the page
+
+- hooks/witness-vite.mjs instruments the component build and injects the
+  runtime; hooks/witness-playwright.template.ts is the fixture DeepTest
+  writes to .deeptest/witness-playwright.ts; runner playwright-ct with a
+  wrapper config in .deeptest/ (own build cache, emptied per run).
+- The one line a project adds: import test and expect from
+  .deeptest/witness-playwright.ts in each spec. The setup screen names the
+  files that lack it. Only what the page runs is counted.
+- New port and fixture: HelloWorlds/react-playwright-ct, test/fixtures/helloworld-react-playwright-ct.
+- Tests: 205 (two new). Needs Playwright's browser in the project
+  (npx playwright install chromium).
+- Verify on HelloWorlds\react-playwright-ct in VS Code after npm install
+  and npx playwright install chromium there: the setup screen says "Found
+  Playwright component tests (@playwright/experimental-ct-react,
+  configured in playwright-ct.config.ts)." and the Witness sentence;
+  "Check my code" reports 10 tests passed, pickGreeting() first with 27
+  ways through, src/greet.ts line 4 showing 6 tests.
 
 ## 2026-09-12, 1.0.6: Witness, and Mocha through it
 

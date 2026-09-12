@@ -14,10 +14,14 @@
  * throw into the code it is measuring.
  */
 'use strict';
-const fs = require('node:fs');
-const path = require('node:path');
+// One file for two places. Under Node it writes its records to disk; in a
+// browser page (served by the Witness Vite plugin) there is no disk, so
+// `end()` returns the record and the fixture on the Node side writes it.
+const inNode = typeof process !== 'undefined' && process.versions && process.versions.node && typeof require === 'function';
+const fs = inNode ? require('node:fs') : undefined;
+const path = inNode ? require('node:path') : undefined;
 
-const attributionDir = process.env.DEEPTEST_ATTRIBUTION_DIR;
+const attributionDir = inNode ? process.env.DEEPTEST_ATTRIBUTION_DIR : undefined;
 const attributionFile = attributionDir ? path.join(attributionDir, `attr-witness-${process.pid}.jsonl`) : undefined;
 
 const files = new Map(); // handle -> { path, cov, W }
@@ -143,9 +147,13 @@ const witness = {
     files.set(handle, { path: filePath, cov, W });
     return W;
   },
-  /** Called by the instrumented file's prologue. */
-  file(handle) {
-    const entry = files.get(handle);
+  /** Called by the instrumented file's prologue; with maps when the file carries its own (a browser page). */
+  file(handle, maps) {
+    let entry = files.get(handle);
+    if (!entry && maps) {
+      witness.register(handle, maps.path, maps);
+      entry = files.get(handle);
+    }
     if (!entry) {
       // Instrumented by a loader this process never ran: count nothing, break nothing.
       const noop = () => undefined;
@@ -160,37 +168,60 @@ const witness = {
     outcomes = new Map();
     entered = new Map();
   },
-  /** The current test ended: write its record and forget it. */
+  /** The current test ended: write its record (Node) or return it (browser), and forget it. */
   end() {
     if (currentTest === undefined) {
-      return;
+      return undefined;
     }
+    let record;
     try {
+      record = { test: currentTest, files: {}, outcomes: {}, entered: {} };
+      for (const [file, lines] of hits) {
+        record.files[file] = Array.from(lines).sort((a, b) => a - b);
+      }
+      for (const [file, perFile] of outcomes) {
+        record.outcomes[file] = {};
+        for (const [id, set] of perFile) {
+          record.outcomes[file][id] = Array.from(set).sort((a, b) => a - b);
+        }
+      }
+      for (const [file, set] of entered) {
+        record.entered[file] = Array.from(set).sort((a, b) => a - b);
+      }
       if (attributionFile) {
-        const record = { test: currentTest, files: {}, outcomes: {}, entered: {} };
-        for (const [file, lines] of hits) {
-          record.files[file] = Array.from(lines).sort((a, b) => a - b);
-        }
-        for (const [file, perFile] of outcomes) {
-          record.outcomes[file] = {};
-          for (const [id, set] of perFile) {
-            record.outcomes[file][id] = Array.from(set).sort((a, b) => a - b);
-          }
-        }
-        for (const [file, set] of entered) {
-          record.entered[file] = Array.from(set).sort((a, b) => a - b);
-        }
         fs.appendFileSync(attributionFile, `${JSON.stringify(record)}\n`);
       }
     } catch {
       // Never fail the user's tests over attribution.
     }
     currentTest = undefined;
+    return record;
+  },
+  /** The whole-run counters as a plain object, for a fixture to carry out of a browser page. */
+  snapshot() {
+    return JSON.parse(JSON.stringify(coverageView()));
+  },
+  /** Zero every counter, so a page reused by a second test starts clean. */
+  reset() {
+    for (const cov of Object.values(coverageView())) {
+      for (const id of Object.keys(cov.s)) {
+        cov.s[id] = 0;
+      }
+      for (const id of Object.keys(cov.f)) {
+        cov.f[id] = 0;
+      }
+      for (const id of Object.keys(cov.b)) {
+        cov.b[id] = cov.b[id].map(() => 0);
+      }
+    }
+    hits = new Map();
+    outcomes = new Map();
+    entered = new Map();
   },
   /** The whole-run counters, Istanbul's shape, written where the driver reads them. */
-  writeReport(dir) {
+  writeReport(dir, name = 'coverage-final.json') {
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'coverage-final.json'), JSON.stringify(coverageView()));
+    fs.writeFileSync(path.join(dir, name), JSON.stringify(coverageView()));
   },
   get current() {
     return currentTest;
@@ -201,4 +232,6 @@ if (!globalThis.__witness__) {
   globalThis.__witness__ = witness;
 }
 
-module.exports = globalThis.__witness__;
+if (inNode) {
+  module.exports = globalThis.__witness__;
+}

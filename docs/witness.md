@@ -1,6 +1,6 @@
 # Witness: DeepTest's own instrumentation
 
-Draft 1, 2026-09-12. Born inside DeepTest under `src/witness/` and `hooks/`; it becomes its own library, `@projectrevivesolutions/witness`, when UntangleIt needs it (see "Where it lives").
+Draft 2, 2026-09-12 (draft 1 earlier the same day; draft 2 adds the Vite plugin, the Playwright fixture, and the engine-counter survey). Born inside DeepTest under `src/witness/` and `hooks/`; it becomes its own library, `@projectrevivesolutions/witness`, when UntangleIt needs it (see "Where it lives").
 
 ## 1. Why it exists
 
@@ -49,6 +49,16 @@ Every source under the source root is instrumented as it loads, ES module or Com
 
 A project whose own TypeScript loader is registered before Witness (tsx, ts-node) hands Witness the transpiled JavaScript, since the last-registered hook runs first and calls the next; line numbers then depend on that transpiler keeping them, which esbuild-based ones do. Node's native type stripping keeps every position, and it is the path the tests use.
 
+## 5b. The Vite plugin and the Playwright fixture (`hooks/witness-vite.mjs`, `hooks/witness-playwright.template.ts`)
+
+A runner that builds the code under test with Vite and runs it in a browser page (Playwright component tests) gets Witness through a Vite plugin the wrapper config adds: every source under the source root is instrumented as Vite transforms it, with its maps embedded in the file's prologue (a page cannot be told about a file any other way), and the runtime is injected into the page's HTML ahead of every module. The same `witness.cjs` runs in the page: it detects that it is not in Node and returns records instead of writing them. Nothing is installed in the project; the plugin, the runtime, and the instrumenter come from `.deeptest/hooks`. The wrapper config re-roots the project's relative paths (`testDir`, `outputDir`, `ctTemplateDir`) against the project, since it lives in `.deeptest/`, and gives the component build its own cache folder, emptied before every run, because Playwright reuses a built bundle when its sources and dependencies are unchanged, config and plugins included, and a bundle built without the plugin would report nothing.
+
+The test boundary is the one thing Playwright only gives from inside a test's worker, through a fixture a test file imports; there is no config-level way to register one ([Playwright, "Fixtures"](https://playwright.dev/docs/test-fixtures)). So DeepTest writes `.deeptest/witness-playwright.ts`, a `test` extended with one automatic fixture, and the project imports `test` and `expect` from it instead of from the Playwright package. That is the one line a project adds, and DeepTest never edits a test itself; the setup screen says which files still lack it and gives the exact import to use. Each test runs in its own page, so the page's counters at the end of the test are that test's attribution; the fixture carries them out with `snapshot()`, resets the page in case a project shares one, and writes one record per test. The driver turns the records into per-test lines, outcomes, and entries, and sums them into the whole-run report.
+
+Only what the page runs is counted. Playwright's own loader transforms whatever a test imports in the worker and short-circuits every other loader, so a function a test calls in Node rather than in the page is not measured; the setup screen and the port's README say so, and the HelloWorlds port tests every function through a component for that reason.
+
+The engine counters were surveyed for this runner and work: a reporter attached over the DevTools protocol to the browser Playwright launched (`--remote-debugging-port` through `launchOptions`) reads `Profiler.takePreciseCoverage` per page with call counts and block detail, with nothing in the project at all. They do not ship in 1.0.7 for attribution because Playwright does not await a reporter's `onTestBegin` and `onTestEnd`, so the boundary they see is late by up to a test, and a number that is right most of the time is the wrong kind of number for density. They remain the path for whole-run coverage without cooperation and for the second, independent count.
+
 ## 6. What proves it
 
 `test/witness.test.ts`, all under `npm test`:
@@ -59,6 +69,8 @@ A project whose own TypeScript loader is registered before Witness (tsx, ts-node
 - The differential test: for every source under `test/fixtures/` (all eight HelloWorlds ports and the older fixtures), all of `src/`, and `hooks/`, istanbul-lib-instrument and Witness must produce the same statement lines, the same function lines, and the same branch types and lines, with nothing skipped. One disagreement fails the test and prints it.
 - The loader, end to end in a child Node: an ES module, a CommonJS module, a TypeScript villain, and a file nobody loads, with the per-test lines, outcomes, and entries asserted; and the instrumented villain compared with an untouched copy of itself on 384 inputs, which must all agree, so the rewrite is proven not to change the program it measures.
 - The universe of files no test loads, from the same instrumenter.
+- The Vite plugin, driven directly: a component under the root comes back instrumented with its maps embedded and its lines intact, a spec and a file outside the root come back untouched, and the HTML hook injects the runtime verbatim.
+- Playwright: detection on the HelloWorlds port, the fixture written for another framework's package, the count of spec files that import it with the exact relative import for one that does not, the wrapper config's re-rooting and cache folder, the summary parser, and two tests' page records merged into per-test attribution and a summed whole-run report.
 
 In the harness the same instrumenter was also run against the whole source of UntangleIt and the complexity library (128 files identical with Istanbul), and the per-test attribution on the Mocha ports was compared with nyc's, line for line on all ten tests.
 
@@ -70,6 +82,7 @@ There are no runtime dependencies between DeepTest and UntangleIt, because they 
 
 ## 8. Not yet
 
-- Jest, Vitest, and the Angular builder keep their own instrumenters in 1.0.6. Moving them onto Witness is the work that turns six drivers into one attribution core with three adapters each (an instrumenter, a transport, a boundary), and it comes after Witness has been on the Marketplace under Mocha.
+- Code a Playwright test runs in Node rather than in the page. Playwright's loader owns the worker; the seam for it is a transform Playwright would have to expose, or the engine counters through `node:inspector` in the worker, which is the same second layer as below.
+- Jest, Vitest, and the Angular builder keep their own instrumenters in 1.0.6 and 1.0.7. Moving them onto Witness is the work that turns six drivers into one attribution core with three adapters each (an instrumenter, a transport, a boundary), and it comes after Witness has been on the Marketplace under Mocha.
 - The engine counters (`Profiler.startPreciseCoverage` / `takePreciseCoverage` through `node:inspector` and the DevTools protocol) are the path for code Witness cannot transform: bundles a builder already produced, browser pages, Playwright component tests. They also give a second, independent count of the same run to check the first against.
 - `outcomes` and `entered` are recorded and not yet read. DeepTest's route confirmation and UntangleIt's fingerprint gate are the readers.

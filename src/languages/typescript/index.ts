@@ -10,7 +10,7 @@ import { DepthOptions, FileStructure } from '../../engine/types';
 import { runtimeEnvironment } from '../shared/runtime';
 import { createParser, initTreeSitter } from '../shared/treeSitter';
 import { CoverageSource, Detection, FieldSpec, HostServices, LanguagePlugin, StructureEnvironment, StructureSource } from '../types';
-import { TypeScriptCoverageSource, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, readPackageJson, resolveModuleDir, walkSources } from './coverage';
+import { TypeScriptCoverageSource, detectPlaywrightCt, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, readPackageJson, resolveModuleDir, walkSources } from './coverage';
 import { analyzeTypeScriptTree } from './structure';
 import { detectFramework, frameworkSentence } from './framework';
 import { extractScript, isSingleFileComponent } from '@projectrevivesolutions/complexity';
@@ -56,6 +56,10 @@ async function detect(workspaceRoot: string, _host: HostServices): Promise<Detec
     if (!resolveModuleDir(workspaceRoot, '@vitest/coverage-istanbul')) {
       notes.push('@vitest/coverage-istanbul is not installed yet; DeepTest will offer to install it on the first run.');
     }
+  } else if (detectPlaywrightCt(workspaceRoot)) {
+    const ct = detectPlaywrightCt(workspaceRoot)!;
+    notes.push(`Found Playwright component tests (${ct.package}${ct.configFile ? `, configured in ${ct.configFile}` : ''}).`);
+    notes.push('They are measured through Witness, which instruments the component build and reads the page; each component test file imports test and expect from .deeptest/witness-playwright.ts, the one line a project adds. Only what the page runs is counted. Nothing needs installing beyond Playwright\'s own browser.');
   } else if (runner) {
     const cfg =
       runner === 'vitest'

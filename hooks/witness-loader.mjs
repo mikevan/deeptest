@@ -11,7 +11,7 @@
  *   DEEPTEST_HOOKS_DIR        where witness.cjs and witness-instrument.cjs are
  *   DEEPTEST_WASM_DIR         where the tree-sitter grammars are
  *   DEEPTEST_SOURCE_ROOT      absolute folder whose files are instrumented
- *   DEEPTEST_COVERAGE_DIR     where coverage-final.json goes at exit
+ *   DEEPTEST_COVERAGE_DIR     where coverage-<pid>.json goes at exit
  *   DEEPTEST_ATTRIBUTION_DIR  where the per-test records go
  */
 import { createRequire, registerHooks } from 'node:module';
@@ -61,7 +61,9 @@ process.on('exit', () => {
   try {
     witness.end();
     if (coverageDir) {
-      witness.writeReport(coverageDir);
+      // One file per process: a runner with workers (Mocha --parallel,
+      // Playwright) has several, and the driver sums them.
+      witness.writeReport(coverageDir, `coverage-${process.pid}.json`);
     }
   } catch {
     // never fail the run over the report

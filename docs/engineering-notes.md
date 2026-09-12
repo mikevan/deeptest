@@ -1168,3 +1168,83 @@ Open, from this work: the non-null mis-parse in the structure analysis
 and the library; moving Jest, Vitest, and the Angular runners onto
 Witness; the engine counters for bundles and browsers; reading
 `outcomes` and `entered`.
+
+
+## Witness in the page: Playwright component tests (1.0.7)
+
+The second runner on Witness, and the first in a browser. docs/witness.md
+section 5b is the design; this is what the build found.
+
+Two routes were surveyed and both work; only one ships for attribution.
+The engine route (a reporter in the wrapper config attached over the
+DevTools protocol, `Profiler.startPreciseCoverage` with call counts and
+block detail, `takePreciseCoverage` per page) gives V8's own counts with
+nothing in the project. Playwright does not await a reporter's
+`onTestBegin` or `onTestEnd`, though, so the reporter's boundary is late
+by up to a test, and in component tests the page can be gone before the
+reporter hears the test ended. Attribution that is right most of the
+time is not attribution. The fixture route is Playwright's documented
+seam and it is exact: one import line per spec file, written by DeepTest,
+never edited into a test by DeepTest.
+
+What was built: `hooks/witness-vite.mjs` (a Vite plugin: instrument every
+source under the root with the maps embedded, inject the runtime into the
+page's HTML), `witness.cjs` made to run in a page as well as in Node
+(returns records instead of writing them), the instrumenter's
+`embedMaps` option and the runtime's `file(handle, maps)`, `snapshot()`,
+and `reset()`, `hooks/witness-playwright.template.ts` (the fixture), the
+`playwright-ct` runner in coverage.ts with its wrapper config, the
+per-test records merged into attribution and a summed report
+(`mergePlaywrightRecords`, `mergeWitnessReports`; the loader now writes
+one report per process, `coverage-<pid>.json`, so runners with workers
+sum instead of overwrite), the `react-playwright-ct` HelloWorlds port
+with every function tested through a component, and a fixture-sync rule
+that keeps `.deeptest/witness-playwright.ts` when copying a port.
+
+Found while building it:
+
+- Playwright resolves `testDir`, `outputDir`, and `ctTemplateDir` against
+  the config file's folder, and joins `ctTemplateDir` with `path.join`,
+  so an absolute path is appended rather than used. The wrapper config in
+  `.deeptest/` re-roots the first two and keeps the template folder
+  relative to itself.
+- `npx playwright` in a component-testing project resolves to the
+  component package's own `cli.js`, which registers the component plugin;
+  `@playwright/test/cli.js` can load a second copy of the runner, and two
+  copies means "Playwright Test did not expect test() to be called here".
+  The driver runs the component package's cli.
+- Playwright reuses a built component bundle when its sources and
+  dependencies are unchanged, and it does not look at the Vite plugins.
+  A bundle built before Witness reported nothing, with every test green.
+  The wrapper gives the build its own cache folder, emptied before every
+  run.
+- Playwright's own loader transforms what a test imports in the worker
+  and short-circuits every other loader (its `load` reads the file itself
+  and never calls `nextLoad`), so the Witness loader cannot see a function
+  a test calls in Node. The first draft put the loader in NODE_OPTIONS
+  anyway and got empty per-process reports; it was taken out rather than
+  left half-working, and the limit is stated on the setup screen, in the
+  port's README, and in docs/witness.md.
+- A default inside a destructured parameter (`{ loud = false }`) is a
+  default-arg branch to Istanbul, and so is a default in a destructuring
+  declaration in a body; the first draft only saw plain parameters. The
+  differential test caught it on the new port's Greeting component.
+- Logical assignment (`a ??= b`) is not a branch to istanbul-lib-instrument
+  6, so the Istanbul view does not count it either; the structure analysis
+  still does. The differential test on coverage.ts caught the mismatch.
+
+- The Witness tests used the bundle in dist/hooks when one existed. The
+  release script runs the tests before the build, so on a machine that
+  had built 1.0.6 the Vite-plugin test ran against the previous release's
+  instrumenter, which had no embedded maps, and failed on the first
+  release attempt. The tests now build the bundle from the current source
+  every time; a prebuilt one is used only when a harness names it.
+
+Verified on the react-playwright-ct port with the plugin compiled from
+this tree and a headless Chromium standing in for Playwright's build: 10
+passed, attribution on 22 lines, greet.ts with exactly the per-line test
+counts every other port has (4(6) 5(1) 7(6) ...), `pickGreeting` first at
+27/73/97, coverage 27.16%. Mocha and React unchanged. Tests: two new in
+test/witness.test.ts (the Vite plugin driven directly; detection, the
+fixture, the wrapper, the summary, and the merge for Playwright), 205 in
+all; the differential test now covers 155 files including the new port.
