@@ -1,6 +1,6 @@
 # DeepTest: build status and run instructions
 
-Updated 2026-09-12 (1.0.5, in the tree). Companion to vscode-density-extension-spec.md.
+Updated 2026-09-12 (1.0.6, in the tree). Companion to vscode-density-extension-spec.md.
 Source tree and VSIX live at C:\workspace\DeepTest on Michael's machine. The
 authoritative copy of this file is docs/build-status.md in that tree.
 Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
@@ -14,6 +14,24 @@ and every extension is tagged 1.0.0 together (DeepTest, UntangleIt, the
 pack, and the library). From here the minor number moves once per language
 across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
 numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
+
+## 2026-09-12, 1.0.6: Witness, and Mocha through it
+
+- DeepTest's own instrumentation (docs/witness.md): src/witness/,
+  hooks/witness.cjs, hooks/witness-loader.mjs, hooks/mocha.cjs, a second
+  esbuild bundle dist/hooks/witness-instrument.cjs.
+- Runner mocha: ES modules and CommonJS, no coverage package, Node 22.15
+  or later (module.registerHooks). Files no test loads come from the same
+  instrumenter.
+- New port and fixture: HelloWorlds/node-mocha, test/fixtures/helloworld-node-mocha.
+- Tests: 203 (seven new, including the differential test against
+  istanbul-lib-instrument on every fixture and all of src/). New named
+  devDependency istanbul-lib-instrument; run npm install once.
+- Verify on HelloWorlds\node-mocha in VS Code (Node 22.15 or later on
+  PATH): the setup screen says "Found mocha (configured in the "mocha"
+  key in package.json)." and the Witness sentence; "Check my code" reports
+  10 tests passed, pickGreeting() first with 27 ways through, and
+  src/greet.js line 4 shows 6 tests. No install button appears.
 
 ## 2026-09-12, 1.0.5: Angular with Karma runs through the builder
 

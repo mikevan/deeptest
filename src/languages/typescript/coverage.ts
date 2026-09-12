@@ -25,6 +25,9 @@ import { FileCoverage } from '../../engine/types';
 import { runProcess } from '../shared/process';
 import { CoverageRun, CoverageSource, EnvironmentCheck, LanguageSettings, RunContext, TestRunSummary } from '../types';
 import { detectAngularKarmaConfig, detectAngularRunnerConfig, detectFramework } from './framework';
+import { createInstrumenter } from '../../witness/hook';
+import { pathToFileURL } from 'node:url';
+import { runtimeEnvironment } from '../shared/runtime';
 
 /**
  * jest and vitest are driven through their own binaries. ng-vitest is
@@ -32,7 +35,7 @@ import { detectAngularKarmaConfig, detectAngularRunnerConfig, detectFramework } 
  * because an Angular project's tests need the Angular compiler and
  * TestBed that only the builder provides (1.0 survey, finding 3a).
  */
-export type Runner = 'jest' | 'vitest' | 'ng-vitest' | 'ng-karma';
+export type Runner = 'jest' | 'vitest' | 'ng-vitest' | 'ng-karma' | 'mocha';
 
 export interface TsFields {
   runner: 'auto' | Runner;
@@ -41,7 +44,7 @@ export interface TsFields {
 
 export function tsFields(settings: LanguageSettings): TsFields {
   const f = settings.fields;
-  const runner = f.runner === 'jest' || f.runner === 'vitest' ? f.runner : 'auto';
+  const runner = f.runner === 'jest' || f.runner === 'vitest' || f.runner === 'mocha' ? f.runner : 'auto';
   return { runner, extraArgs: typeof f.extraArgs === 'string' ? f.extraArgs : '' };
 }
 
@@ -78,13 +81,14 @@ export function walkSources(root: string, relative = ''): string[] {
   return out;
 }
 
-export function readPackageJson(workspaceRoot: string): { deps: Record<string, string>; scripts: Record<string, string>; jest?: unknown } | undefined {
+export function readPackageJson(workspaceRoot: string): { deps: Record<string, string>; scripts: Record<string, string>; jest?: unknown; mocha?: unknown } | undefined {
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(workspaceRoot, 'package.json'), 'utf8')) as Record<string, unknown>;
     return {
       deps: { ...(pkg.dependencies as Record<string, string> | undefined), ...(pkg.devDependencies as Record<string, string> | undefined) },
       scripts: (pkg.scripts as Record<string, string> | undefined) ?? {},
       jest: pkg.jest,
+      mocha: pkg.mocha,
     };
   } catch {
     return undefined;
@@ -124,17 +128,18 @@ export function detectRunner(workspaceRoot: string): Runner | undefined {
   const pkg = readPackageJson(workspaceRoot);
   const hasVitest = Boolean(pkg?.deps.vitest) || Boolean(resolveModuleDir(workspaceRoot, 'vitest'));
   const hasJest = Boolean(pkg?.deps.jest) || Boolean(resolveModuleDir(workspaceRoot, 'jest'));
+  const hasMocha = Boolean(pkg?.deps.mocha) || Boolean(resolveModuleDir(workspaceRoot, 'mocha'));
   const testScript = pkg?.scripts.test ?? '';
-  if (hasVitest && hasJest) {
-    return /\bjest\b/.test(testScript) && !/\bvitest\b/.test(testScript) ? 'jest' : 'vitest';
+  const named = (word: string): boolean => new RegExp(`\\b${word}\\b`).test(testScript);
+  // The test script settles a tie; otherwise the order is Vitest, Jest, Mocha.
+  const present = [hasVitest && 'vitest', hasJest && 'jest', hasMocha && 'mocha'].filter((r): r is 'vitest' | 'jest' | 'mocha' => Boolean(r));
+  if (present.length > 1) {
+    const chosen = present.filter((r) => named(r));
+    if (chosen.length === 1) {
+      return chosen[0];
+    }
   }
-  if (hasVitest) {
-    return 'vitest';
-  }
-  if (hasJest) {
-    return 'jest';
-  }
-  return undefined;
+  return present[0];
 }
 
 /** The coverage package pinned to the project's Vitest major: "@vitest/coverage-istanbul@4" for Vitest 4.x. */
@@ -275,8 +280,10 @@ function escapeRegex(s: string): string {
 }
 
 export interface TsCoverageOptions {
-  /** Absolute folder holding hooks/jest.cjs and hooks/vitest.mjs. */
+  /** Absolute folder holding the hook files (jest.cjs, vitest.mjs, the Witness runtime and loader, and so on). */
   hooksDir: string;
+  /** Absolute folder holding the tree-sitter grammars; the Witness loader reads them from here. */
+  wasmDir?: string;
 }
 
 export class TypeScriptCoverageSource implements CoverageSource {
@@ -328,6 +335,9 @@ export class TypeScriptCoverageSource implements CoverageSource {
     const runner = this.runnerFor(ctx.workspaceRoot, ctx.settings);
     if (runner === 'ng-vitest' || runner === 'ng-karma') {
       return this.checkAngularEnvironment(ctx.workspaceRoot, nodeVersion, runner);
+    }
+    if (runner === 'mocha') {
+      return this.checkMochaEnvironment(ctx.workspaceRoot, nodeVersion);
     }
     if (!runner) {
       return {
@@ -443,6 +453,75 @@ export class TypeScriptCoverageSource implements CoverageSource {
     return { ok: true, summary: `Node ${nodeVersion}, ng test with vitest ${vitestVersion}`, problems: [] };
   }
 
+  /**
+   * Mocha runs under the Witness loader, which needs module.registerHooks:
+   * Node 22.15 or later (Node.js, "Modules: node:module API"). Nothing else
+   * is required: no coverage package, because Witness instruments the
+   * sources itself, in ES modules and CommonJS alike.
+   */
+  private checkMochaEnvironment(workspaceRoot: string, nodeVersion: string): EnvironmentCheck {
+    const supported = nodeSupportsWitness(nodeVersion);
+    if (!supported) {
+      return {
+        ok: false,
+        summary: `Node ${nodeVersion}, mocha`,
+        problems: [`DeepTest measures Mocha projects through the Witness loader, which needs Node 22.15 or later; this project runs on Node ${nodeVersion}. Install a current Node and run the check again.`],
+      };
+    }
+    const mochaDir = resolveModuleDir(workspaceRoot, 'mocha');
+    if (!mochaDir) {
+      return {
+        ok: false,
+        summary: `Node ${nodeVersion}, mocha not installed`,
+        problems: ['mocha is listed in package.json but is not installed under node_modules. Run npm install.'],
+        fix: { title: 'Run npm install', command: 'npm', args: ['install'] },
+      };
+    }
+    let mochaVersion = '';
+    try {
+      mochaVersion = JSON.parse(fs.readFileSync(path.join(mochaDir, 'package.json'), 'utf8')).version ?? '';
+    } catch {
+      // version is decoration
+    }
+    return { ok: true, summary: `Node ${nodeVersion}, mocha ${mochaVersion} through Witness`, problems: [] };
+  }
+
+  /**
+   * Mocha through Witness. The loader goes in through NODE_OPTIONS so a
+   * --parallel run's workers carry it too; the root hook plugin tells the
+   * runtime which test is running. Files no test loads get their maps from
+   * the same instrumenter, so the universe and the counters agree by
+   * construction.
+   */
+  private async runMocha(ctx: RunContext): Promise<CoverageRun> {
+    const mochaDir = resolveModuleDir(ctx.workspaceRoot, 'mocha');
+    if (!mochaDir) {
+      throw new Error('mocha is not installed. Run npm install.');
+    }
+    const { attrDir, coverageDir, hookDir, env } = this.prepareWorkDir(ctx);
+    const { extraArgs } = tsFields(ctx.settings);
+    const testsPath = ctx.settings.testsPath;
+    const sourceRoot = path.join(ctx.workspaceRoot, ctx.settings.sourceRoot || '');
+    const loader = pathToFileURL(path.join(hookDir, 'witness-loader.mjs')).href;
+    const witnessEnv = {
+      ...env,
+      NODE_OPTIONS: `${env.NODE_OPTIONS ? `${env.NODE_OPTIONS} ` : ''}--import=${loader}`,
+      DEEPTEST_WASM_DIR: this.options.wasmDir ?? runtimeEnvironment().wasmDir,
+      DEEPTEST_SOURCE_ROOT: sourceRoot,
+      DEEPTEST_COVERAGE_DIR: coverageDir,
+    };
+    const args = [path.join(mochaDir, 'bin', 'mocha.js'), '--require', path.join(hookDir, 'mocha.cjs'), ...splitArgs(extraArgs), ...(testsPath ? [`${testsPath}/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}`] : [])];
+    ctx.log(`$ NODE_OPTIONS=--import=${loader} node ${args.join(' ')}`);
+    const run = await runProcess('node', args, { cwd: ctx.workspaceRoot, env: witnessEnv, log: ctx.log, signal: ctx.signal });
+    const tests = parseMochaSummary(run.output, run.exitCode);
+    const relSourceRoot = ctx.settings.sourceRoot || '';
+    const walked = walkSources(sourceRoot)
+      .map((rel) => (relSourceRoot ? `${relSourceRoot}/${rel}` : rel))
+      .filter((rel) => !isTestFile(rel) && !(testsPath && rel.startsWith(`${testsPath}/`)));
+    const extra = await witnessUniverse(ctx.workspaceRoot, walked, this.options.wasmDir ?? runtimeEnvironment().wasmDir, ctx.log);
+    return this.collect(ctx, 'mocha', coverageDir, attrDir, tests, run.exitCode, extra);
+  }
+
   async run(ctx: RunContext): Promise<CoverageRun> {
     const runner = this.runnerFor(ctx.workspaceRoot, ctx.settings);
     if (!runner) {
@@ -453,6 +532,9 @@ export class TypeScriptCoverageSource implements CoverageSource {
     }
     if (runner === 'ng-karma') {
       return this.runAngularKarma(ctx);
+    }
+    if (runner === 'mocha') {
+      return this.runMocha(ctx);
     }
     const { workDir, attrDir, coverageDir, hookDir, env } = this.prepareWorkDir(ctx);
     const { extraArgs } = tsFields(ctx.settings);
@@ -572,8 +654,11 @@ export class TypeScriptCoverageSource implements CoverageSource {
     // environment so a bundling runner cannot break the path.
     const hookDir = path.join(workDir, 'hooks');
     fs.mkdirSync(hookDir, { recursive: true });
-    for (const file of ['vitest.mjs', 'attribution.cjs', 'karma.cjs', 'karma-client.js']) {
-      fs.copyFileSync(path.join(this.options.hooksDir, file), path.join(hookDir, file));
+    for (const file of ['vitest.mjs', 'attribution.cjs', 'karma.cjs', 'karma-client.js', 'witness.cjs', 'witness-loader.mjs', 'witness-instrument.cjs', 'mocha.cjs']) {
+      const from = path.join(this.options.hooksDir, file);
+      if (fs.existsSync(from)) {
+        fs.copyFileSync(from, path.join(hookDir, file));
+      }
     }
     ctx.log(`Hook copied into ${hookDir}.`);
     const env = { ...process.env, DEEPTEST_ATTRIBUTION_DIR: attrDir, DEEPTEST_HOOKS_DIR: hookDir, CI: process.env.CI ?? 'true', NO_COLOR: '1', FORCE_COLOR: '0' };
@@ -583,7 +668,7 @@ export class TypeScriptCoverageSource implements CoverageSource {
   private collect(ctx: RunContext, runner: Runner, coverageDir: string, attrDir: string, tests: TestRunSummary, exitCode: number | null, extra: FileCoverage[] = []): CoverageRun {
     const finalJson = path.join(coverageDir, 'coverage-final.json');
     if (!fs.existsSync(finalJson)) {
-      throw new Error(`${runner === 'ng-vitest' || runner === 'ng-karma' ? 'ng test' : runner} produced no coverage, and ended with exit code ${exitCode}. Press "Show the log" to see the test run.`);
+      throw new Error(`${runner === 'ng-vitest' || runner === 'ng-karma' ? 'ng test' : runner === 'mocha' ? 'mocha under Witness' : runner} produced no coverage, and ended with exit code ${exitCode}. Press "Show the log" to see the test run.`);
     }
     const attribution: string[] = [];
     for (const file of fs.readdirSync(attrDir)) {
@@ -831,4 +916,58 @@ export function angularCliBin(workspaceRoot: string): string | undefined {
   }
   const bin = path.join(dir, 'bin', 'ng.js');
   return fs.existsSync(bin) ? bin : undefined;
+}
+
+/** module.registerHooks exists from Node 22.15.0 and 23.5.0 ("Modules: node:module API", https://nodejs.org/api/module.html). */
+export function nodeSupportsWitness(version: string): boolean {
+  const m = /v?(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (!m) {
+    return false;
+  }
+  const [major, minor] = [Number(m[1]), Number(m[2])];
+  return major > 23 || (major === 23 && minor >= 5) || (major === 22 && minor >= 15);
+}
+
+/** Mocha's summary: "10 passing (5ms)", "2 failing", "1 pending". */
+export function parseMochaSummary(output: string, exitCode: number | null): TestRunSummary {
+  const summary: TestRunSummary = { passed: 0, failed: 0, errors: 0, skipped: 0, exitCode };
+  const text = stripAnsi(output);
+  const grab = (word: string): number => {
+    const m = new RegExp(`(\\d+) ${word}`).exec(text);
+    return m ? Number(m[1]) : 0;
+  };
+  summary.passed = grab('passing');
+  summary.failed = grab('failing');
+  summary.skipped = grab('pending');
+  if (summary.passed + summary.failed + summary.skipped === 0 && exitCode !== 0) {
+    summary.errors = 1;
+  }
+  return summary;
+}
+
+/**
+ * The executable universe of files the run never loaded, from the Witness
+ * instrumenter in this process: the same rules as the counters, so a loaded
+ * file and an unloaded one are measured alike. Every line is untested.
+ */
+export async function witnessUniverse(workspaceRoot: string, relativePaths: string[], wasmDir: string, log: (line: string) => void): Promise<FileCoverage[]> {
+  if (relativePaths.length === 0) {
+    return [];
+  }
+  const instrumenter = await createInstrumenter(wasmDir);
+  const out: FileCoverage[] = [];
+  for (const rel of relativePaths) {
+    const abs = path.join(workspaceRoot, rel);
+    try {
+      const maps = instrumenter.mapsOnly(abs.split(path.sep).join('/'), fs.readFileSync(abs, 'utf8'));
+      const lines = new Map<number, Set<string>>();
+      for (const stmt of Object.values(maps.statementMap)) {
+        lines.set(stmt.start.line, new Set());
+      }
+      out.push({ path: rel, lines, executed: new Set() });
+    } catch (err) {
+      log(`Could not read the executable lines of ${rel}: ${(err as Error).message.split('\n')[0]}`);
+    }
+  }
+  return out;
 }

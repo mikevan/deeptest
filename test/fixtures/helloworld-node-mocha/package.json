@@ -1,0 +1,17 @@
+{
+  "name": "helloworld-node-mocha",
+  "private": true,
+  "version": "1.0.0",
+  "description": "HelloWorld for DeepTest and UntangleIt: plain Node, ES modules, Mocha with node:assert. No coverage tool: DeepTest measures it through Witness. Same functions, same tests, same villain as the Python original.",
+  "type": "module",
+  "engines": { "node": ">=22.15" },
+  "scripts": {
+    "test": "mocha"
+  },
+  "mocha": {
+    "spec": "test/**/*.test.js"
+  },
+  "devDependencies": {
+    "mocha": "^11.7.0"
+  }
+}

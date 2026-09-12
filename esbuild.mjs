@@ -62,9 +62,28 @@ const ctx = await esbuild.context({
   logLevel: 'info',
 });
 
+// The Witness instrumenter runs inside the project's own Node process, where
+// DeepTest's node_modules does not exist, so it is bundled whole (web-tree-sitter
+// included) into one CommonJS file beside the other hooks. The grammars stay
+// in dist/ and the loader reads them from DEEPTEST_WASM_DIR.
+const witness = await esbuild.context({
+  entryPoints: ['src/witness/hook.ts'],
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: 'node22',
+  outfile: 'dist/hooks/witness-instrument.cjs',
+  plugins: [treeSitterCjs],
+  sourcemap: false,
+  logLevel: 'info',
+});
+
 if (watch) {
   await ctx.watch();
+  await witness.watch();
 } else {
   await ctx.rebuild();
+  await witness.rebuild();
   await ctx.dispose();
+  await witness.dispose();
 }

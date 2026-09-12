@@ -1037,3 +1037,134 @@ Karma's summary. Tests: three new in DeepTest (the Karma summary parser,
 the Karma config detection with both builders, and the unloaded-file
 universe on the fixture's villain) and the Angular environment test
 rewritten, 196 in all; UntangleIt's Angular test extended (15).
+
+## 1.0.6 survey: Mocha and Playwright component tests (2026-09-12)
+
+The plan left two runners to a survey before they earned a driver. Both
+were run in the harness against the HelloWorld modules; nothing in the
+plugin changed for this section.
+
+Mocha, CommonJS. A port of the three modules (greet, names, schedule) as
+CommonJS with ten Mocha specs on node:assert, mocha 11 and nyc 17. The
+run `nyc --reporter=json --report-dir .deeptest/coverage --all --include
+'src/**' mocha --require .deeptest/hooks/mocha.cjs` works with the
+attribution helper as it is: nyc's require hook instruments through
+babel-plugin-istanbul into `global.__coverage__`, the root hook plugin
+(`exports.mochaHooks = { beforeEach, afterEach }`) snapshots and diffs the
+same way the Jest hook does, the test id is `<spec file>::<fullTitle>`
+from `this.currentTest`, and `--all` puts the never-loaded villain in
+the report with every line untested. Ten attributions, keys by source
+path, lines right. A Mocha driver for CommonJS is a copy of the Jest
+driver with different arguments.
+
+Mocha, ES modules. The same port with `"type": "module"` runs green under
+nyc and reports zero hits on every line of every file: nyc instruments
+through the CommonJS require hook and never sees an ES module. That is
+the falsely-red report, the survey's Vue finding in reverse, and it is
+the shape a modern Mocha project has. Fix proven in the harness: a
+DeepTest loader (`node --import .deeptest/hooks/instrument-loader.mjs`)
+registers a `load` hook that instruments every source under the source
+root with the project's istanbul-lib-instrument (nyc's own dependency)
+before Node evaluates it, so `__coverage__` exists and the same mocha
+hook attributes ten of ten with the same lines as CommonJS. The
+whole-run report then has to come from DeepTest too (write
+`__coverage__` at process exit; instrument never-loaded files the way
+the Karma driver does), which makes the loader a runner-independent
+Node path: it would serve `node --test` and any other Node runner
+unchanged. Cost: the loader is new code with the same care the Karma
+hook needed; benefit: every ESM Node project.
+
+Playwright component tests. A React port with @playwright/test 1.63,
+@playwright/experimental-ct-react, and vite-plugin-istanbul in
+`ctViteConfig`, run against the harness's Chromium 141 through
+`launchOptions.executablePath` (Playwright wanted its own build 1234 and
+could not download it there; the older build ran the two tests fine).
+`window.__coverage__` is in the page, keyed by source path with the
+TypeScript inputSourceMap, and a `test.afterEach` reading it through
+`page.evaluate` gives per-test counters: each test gets a fresh page, so
+the counters at the end of a test are that test's attribution with no
+diff needed. What is not solved is getting that fixture into the
+project's tests without editing them: Playwright has no global hook
+with page access, only `globalSetup` (no page) and reporters (no page).
+The route is Node module hooks (`module.registerHooks`, Node 22.15 and
+later) in the worker processes through NODE_OPTIONS, redirecting
+`@playwright/experimental-ct-*` to a DeepTest wrapper that re-exports
+the package's `test` extended with an automatic fixture; unproven, and
+the driver would also need `vite-plugin-istanbul` as its install offer.
+Feasible, a delivery of its own, and it needs a HelloWorlds port.
+
+Recommendation, for the decision: 1.0.6 the Mocha driver with the
+DeepTest loader for ESM (CommonJS through nyc when nyc is present, the
+loader otherwise); 1.0.7 Playwright component tests through module
+hooks, with a `react-playwright-ct` port; 1.0.8 the words and the pages.
+Or stop at Mocha CommonJS and Playwright detected-and-explained, and
+close the slot at 1.0.7 as planned.
+
+## Witness: Mocha through DeepTest's own instrumentation (1.0.6)
+
+The 1.0.6 survey ended with a choice, and the choice was to build the
+right thing: DeepTest instruments the sources itself, in one loader for
+ES modules and CommonJS, with no dependency on nyc or any coverage
+package. docs/witness.md is the design; this section is what happened
+while building it.
+
+What was built: `src/witness/instrument.ts` (the instrumenter, on the
+tree-sitter grammars already shipped, textual insertion on the same
+lines, Istanbul-shaped maps), `hooks/witness.cjs` (the runtime, the
+`__witness__` global with `__coverage__` beside it, per-test lines,
+outcomes, and function entries), `hooks/witness-loader.mjs`
+(`module.registerHooks`), `hooks/mocha.cjs` (a root hook plugin that
+only says which test is running), the `mocha` runner in coverage.ts
+(NODE_OPTIONS carries the loader so --parallel workers get it too; the
+universe of files no test loads comes from the same instrumenter in the
+extension's process), esbuild's second bundle
+(dist/hooks/witness-instrument.cjs, web-tree-sitter inside), the Mocha
+option on the setup screen, and the `node-mocha` HelloWorlds port.
+
+Found while building it, in the order the tests caught them:
+
+- Istanbul makes one branch of a whole run of logical operators
+  whatever the operators and parentheses. The first draft made one per
+  operator, and the differential test disagreed on 13 lines across
+  DeepTest's own source. Mirrored.
+- tree-sitter-typescript reads `a && b!.c` as `(a && b)!.c` (issue 299,
+  open, present in the current release). The first fix skipped such
+  runs and reported them; the right fix blanks every non-null assertion
+  before the real parse, since `!` means nothing at run time. Zero
+  skipped on 128 files afterwards. The same mis-parse touches the
+  structure analysis and the MBCC operand rule in both tools and the
+  library: a fix of its own, listed under "open".
+- A `for` body that is an `if` was not wrapped in braces (the rule that
+  spares `else if` had spared every `if`), so `continue` inside it fell
+  outside the loop. Caught by `node --check` in the shapes test.
+- A counter in front of an `else if` splits it from its `else`, and the
+  result is a valid program that does something else. `node --check`
+  cannot catch that; the pattern assertion did. The statement counter
+  for an `else if` now rides inside its condition.
+- A counter in front of `'use strict'` demotes the directive to a
+  string. Directives are not statements to Istanbul either; the
+  differential test on hooks/ caught it.
+- A `require()`d CommonJS file arrives in the load hook with no
+  `format` on Node 22; the loader's format filter rejected it and CommonJS
+  projects came back empty. Fixed by treating no format as a script when
+  the file is under the source root.
+- `module.register` (async hooks) does not affect `require()` and is
+  deprecated in Node 26; `module.registerHooks` covers both and is the
+  floor: Node 22.15.
+
+Verified on the ports with the plugin compiled from this tree: the new
+node-mocha port (ES modules) 10 passing, attribution on 17 lines, the
+villain first at 27/73/97, coverage 22.37%, exactly the Python port's
+shape; a CommonJS copy the same; per-test lines identical to nyc's on
+every test where nyc can run at all. React, Vue, Svelte, Angular, and
+Python unchanged. Tests: seven new in test/witness.test.ts including the
+differential test over every fixture and all of src/, and the loader
+run that compares the instrumented villain with an untouched copy on
+384 inputs; 203 in all. istanbul-lib-instrument is now a named
+devDependency (it was only ever hoisted from @vitest/coverage-istanbul,
+and the differential test must not depend on hoisting).
+
+Open, from this work: the non-null mis-parse in the structure analysis
+and the library; moving Jest, Vitest, and the Angular runners onto
+Witness; the engine counters for bundles and browsers; reading
+`outcomes` and `entered`.

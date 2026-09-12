@@ -24,8 +24,9 @@ const FIELDS: FieldSpec[] = [
       { value: 'auto', label: 'Detect from package.json' },
       { value: 'vitest', label: 'Vitest' },
       { value: 'jest', label: 'Jest' },
+      { value: 'mocha', label: 'Mocha' },
     ],
-    hint: 'Jest brings its own coverage. Vitest needs @vitest/coverage-istanbul; DeepTest offers to install it.',
+    hint: 'Jest brings its own coverage. Vitest needs @vitest/coverage-istanbul; DeepTest offers to install it. Mocha needs nothing: DeepTest measures it through Witness on Node 22.15 or later.',
   },
   {
     key: 'extraArgs',
@@ -59,10 +60,17 @@ async function detect(workspaceRoot: string, _host: HostServices): Promise<Detec
     const cfg =
       runner === 'vitest'
         ? findVitestConfig(workspaceRoot)
-        : pkg.jest
-          ? 'the "jest" key in package.json'
-          : ['jest.config.js', 'jest.config.ts', 'jest.config.mjs', 'jest.config.cjs', 'jest.config.json'].find((f) => fs.existsSync(path.join(workspaceRoot, f)));
+        : runner === 'mocha'
+          ? pkg.mocha
+            ? 'the "mocha" key in package.json'
+            : ['.mocharc.cjs', '.mocharc.js', '.mocharc.json', '.mocharc.jsonc', '.mocharc.yaml', '.mocharc.yml'].find((f) => fs.existsSync(path.join(workspaceRoot, f)))
+          : pkg.jest
+            ? 'the "jest" key in package.json'
+            : ['jest.config.js', 'jest.config.ts', 'jest.config.mjs', 'jest.config.cjs', 'jest.config.json'].find((f) => fs.existsSync(path.join(workspaceRoot, f)));
     notes.push(`Found ${runner}${cfg ? ` (configured in ${cfg})` : ''}.`);
+    if (runner === 'mocha') {
+      notes.push('Mocha is measured through Witness, DeepTest\'s own instrumentation, in ES modules and CommonJS alike. Nothing needs installing; Node 22.15 or later is required.');
+    }
     if (runner === 'vitest' && !resolveModuleDir(workspaceRoot, '@vitest/coverage-istanbul')) {
       notes.push('@vitest/coverage-istanbul is not installed yet; DeepTest will offer to install it on the first run.');
     }
@@ -137,7 +145,7 @@ export const typescriptPlugin: LanguagePlugin = {
   isTestFile,
   detect,
   createCoverageSource(): CoverageSource {
-    return new TypeScriptCoverageSource({ hooksDir: runtimeEnvironment().hooksDir });
+    return new TypeScriptCoverageSource({ hooksDir: runtimeEnvironment().hooksDir, wasmDir: runtimeEnvironment().wasmDir });
   },
   async createStructureSource(env: StructureEnvironment): Promise<StructureSource> {
     await initTreeSitter(path.join(env.wasmDir, 'web-tree-sitter.wasm'));

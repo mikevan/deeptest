@@ -44,7 +44,7 @@ Full detail in DeepTest's docs/engineering-notes.md under "1.0 survey". Every po
 | angular-vitest | **Fails twice.** The plugin drives the vitest binary and bypasses the Angular builder; the coverage-package install is unpinned and fetched a major that does not match the project's Vitest. Through `ng test` with `--setup-files`, `--coverage-include`, and a json reporter it runs and covers every file, but per-test attribution names bundle chunks, not sources: the source-map question is phase 3's first job. |
 | angular-karma | **Wrong advice.** "No test runner found. Install Vitest or Jest." on a project that has Karma. |
 
-Revised order: 1.0.1 fixes the two production bugs (hook location, pinned install); 1.0.2 fixes the Karma advice and makes `.vue` and `.svelte` visible (red, never invisible); 1.0.3 parses them; 1.0.4 is the Angular driver through the builder with the source-map answer; 1.0.5 Karma through the same builder; then as planned.
+Revised order: 1.0.1 fixes the two production bugs (hook location, pinned install); 1.0.2 fixes the Karma advice and makes `.vue` and `.svelte` visible (red, never invisible); 1.0.3 parses them; 1.0.4 is the Angular driver through the builder with the source-map answer; 1.0.5 Karma through the same builder; 1.0.6 Mocha through Witness, DeepTest's own instrumentation (docs/witness.md), after the survey found that nyc cannot see an ES-module project at all; 1.0.7 Playwright component tests through the engine counters; 1.0.8 the words and the pages.
 
 ## The phases, in order
 
