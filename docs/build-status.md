@@ -1,6 +1,8 @@
 # DeepTest: build status and run instructions
 
-Updated 2026-09-12 (1.0.7, in the tree). Companion to vscode-density-extension-spec.md.
+Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
+
+Updated 2026-09-12 (1.0.8, in the tree). The 1.0 slot is complete at this build. Companion to vscode-density-extension-spec.md.
 Source tree and VSIX live at C:\workspace\DeepTest on Michael's machine. The
 authoritative copy of this file is docs/build-status.md in that tree.
 Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
@@ -14,6 +16,27 @@ and every extension is tagged 1.0.0 together (DeepTest, UntangleIt, the
 pack, and the library). From here the minor number moves once per language
 across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
 numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
+
+## 2026-09-12, 1.0.8: the words and the pages; the 1.0 slot is done
+
+- README Languages, Requirements, and Known Limits say what shipped;
+  UntangleIt's test gate drives Mocha and Playwright component tests; the
+  toolkit documents are level across DeepTest, UntangleIt, and the pack;
+  the roadmap marks 1.0 done. 205 tests.
+- Playwright component tests no longer need the import line: a resolve
+  hook in Playwright's workers (hooks/witness-playwright-loader.mjs,
+  through NODE_OPTIONS) answers each spec's import of the component
+  package with DeepTest's fixture, written under .deeptest/hooks/. The
+  HelloWorlds port commits no .deeptest folder and its specs import the
+  package again. Witness never writes to a project file; the README and
+  the setup notes say so in those words.
+- Verify: on HelloWorlds\react-playwright-ct, with the two specs
+  importing from "@playwright/experimental-ct-react" and no .deeptest
+  folder committed, Check the tests passes 10 tests, greet.ts shows the
+  same per-line test counts as before (4(6) 5(1) 7(6)), and
+  pickGreeting is first at 27/73/97; the setup screen's Playwright note
+  says nothing in the project changes. On HelloWorlds\node-mocha,
+  UntangleIt's setup screen names the runner "mocha".
 
 ## 2026-09-12, 1.0.7: Playwright component tests through Witness in the page
 

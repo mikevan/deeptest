@@ -1,5 +1,7 @@
 # DeepTest user acceptance test
 
+Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
+
 Run through this as Jeff would: press what he would press, read what he
 would read, and write down the exact words on screen wherever they do not
 match. Every case ends with what you should see. If you see something

@@ -1,5 +1,7 @@
 # MikeVan's AI Development Toolkit: common design and architecture language
 
+Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
+
 Draft 5, 2026-09-12 (draft 4 earlier the same day, draft 3 was 2026-09-11, draft 2 2026-09-09, draft 1 2026-09-06). Publisher: `prs` (Project Revive Solutions, LLC). The toolkit is MikeVan's AI Development Toolkit; the company publishes it. The words and the shape every tool in the toolkit shares, so that KeepSafe, DeepTest, UntangleIt, and whatever comes next read as one product family, integrate without knowing each other's insides, and can be reviewed against one standard. Where a tool departs from this document, the departure is written down in that tool's engineering notes with the reason.
 
 Draft 5 change: Witness, the toolkit's own instrumentation, is a second shared library, and principle 4 now says what shared libraries may and may not be (2026-09-12, later the same day). Draft 4 change: which number belongs to which tool, settled 2026-09-12 (see "Ways through" and "Tangle" below, and the MBCC paper, mbcc-why-and-how.md). Draft 3 change: the untangling tool is named UntangleIt (2026-09-11). The Marketplace refused its first display name as too similar to an existing listing, and the tool was unpublished, so the name, id, commands, and storage folder all changed at once. See toolkit-api.md for the identifiers.

@@ -1,4 +1,4 @@
-import { test, expect } from '../../.deeptest/witness-playwright';
+import { test, expect } from '@playwright/experimental-ct-react';
 import { NameTag } from './NameTag';
 
 test('cleanName trims', async ({ mount }) => {

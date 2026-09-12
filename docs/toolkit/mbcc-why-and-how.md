@@ -1,6 +1,6 @@
 # MikeVan's Better Cognitive Complexity: why it exists and what it is for
 
-Michael Van Geertruy, Project Revive Solutions, LLC. Draft 2, 2026-09-12. Part of MikeVan's AI Development Toolkit.
+Michael Van Geertruy, with Claude. Project Revive Solutions, LLC. Draft 2, 2026-09-12. Part of MikeVan's AI Development Toolkit.
 
 ## 1. The mission this number serves
 

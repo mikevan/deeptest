@@ -1,5 +1,7 @@
 # MikeVan's AI Development Toolkit: how the tools talk to each other
 
+Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
+
 Draft 5, 2026-09-12 (draft 4 was 2026-09-11, draft 3 2026-09-09, draft 2 2026-09-06). Publisher: `prs` (Project Revive Solutions, LLC). Companion to toolkit-architecture.md. This is the contract between tools. Anything not written here is private to a tool and may change without notice.
 
 Draft 4 change: the untangling tool is named **UntangleIt**. The Marketplace upload under its first display name was refused by the similarity check ("refactorix already exists"), and a dormant Visual Studio extension by mynkow (last active around 2017) shares that first name on the Marketplace website. The tool was unpublished, so the rename is free: id `prs.untangleit`, commands `untangleit.*`, records `.untangleit/`, folder `C:\workspace\UntangleIt`, repo `mikevan/untangleit`. The pack folder and repo are `MADTPackage`.

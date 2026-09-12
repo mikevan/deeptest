@@ -533,13 +533,22 @@ export class TypeScriptCoverageSource implements CoverageSource {
    * through a Vite plugin the wrapper config adds, and the page reports to
    * the Witness runtime the same plugin injects, so nothing is installed
    * in the project. Playwright runs code inside a test's worker only
-   * through a fixture a test file imports (Playwright, "Fixtures"), so per
-   * test attribution needs one line in each component test: import `test`
-   * and `expect` from .deeptest/witness-playwright.ts instead of the
-   * Playwright package. DeepTest writes that file and never edits a test.
+   * through a fixture a test file imports (Playwright, "Fixtures"), so
+   * DeepTest writes its fixture to .deeptest/hooks/ and a resolve hook in
+   * every Playwright process (hooks/witness-playwright-loader.mjs, through
+   * NODE_OPTIONS) answers each spec's import of the component package with
+   * that file. The spec keeps its ordinary import; nothing in the project
+   * changes. The hook needs the same Node as Mocha does.
    */
   private checkPlaywrightEnvironment(workspaceRoot: string, nodeVersion: string, settings: LanguageSettings): EnvironmentCheck {
     const ct = detectPlaywrightCt(workspaceRoot)!;
+    if (!nodeSupportsWitness(nodeVersion)) {
+      return {
+        ok: false,
+        summary: `Node ${nodeVersion}, Playwright component tests`,
+        problems: [`DeepTest attributes Playwright component tests through a hook in Playwright's workers, which needs Node 22.15 or later; this project runs on Node ${nodeVersion}. Install a current Node and run the check again.`],
+      };
+    }
     if (!resolveModuleDir(workspaceRoot, '@playwright/test') || !resolveModuleDir(workspaceRoot, ct.package)) {
       return {
         ok: false,
@@ -548,22 +557,10 @@ export class TypeScriptCoverageSource implements CoverageSource {
         fix: { title: 'Run npm install', command: 'npm', args: ['install'] },
       };
     }
-    writePlaywrightFixture(workspaceRoot, ct.package);
-    const importing = playwrightTestsImportingFixture(workspaceRoot, settings);
-    if (importing.total === 0) {
+    if (playwrightComponentTests(workspaceRoot, settings).length === 0) {
       return { ok: false, summary: `Node ${nodeVersion}, Playwright component tests`, problems: [`No component test was found (${ct.configFile ?? 'no playwright-ct config'}).`] };
     }
-    if (importing.withFixture === 0) {
-      return {
-        ok: false,
-        summary: `Node ${nodeVersion}, Playwright component tests, fixture not imported`,
-        problems: [
-          `Playwright runs code inside a test only through a fixture the test imports, so DeepTest cannot attribute lines to tests until each component test imports its fixture. DeepTest wrote .deeptest/witness-playwright.ts; in each of the ${importing.total} component test files change the import of test and expect from "${ct.package}" to that file (for example: import { test, expect } from '${importing.exampleImport}';) and commit the file with your tests. Nothing needs installing.`,
-        ],
-      };
-    }
-    const partial = importing.withFixture < importing.total ? ` ${importing.total - importing.withFixture} of ${importing.total} component test files do not import the fixture yet; their tests run but are not attributed.` : '';
-    return { ok: true, summary: `Node ${nodeVersion}, Playwright component tests through Witness`, problems: partial ? [partial.trim()] : [] };
+    return { ok: true, summary: `Node ${nodeVersion}, Playwright component tests through Witness`, problems: [] };
   }
 
   private async runPlaywrightCt(ctx: RunContext): Promise<CoverageRun> {
@@ -580,7 +577,8 @@ export class TypeScriptCoverageSource implements CoverageSource {
       throw new Error('No playwright-ct config file was found at the workspace root.');
     }
     const { workDir, attrDir, coverageDir, hookDir, env } = this.prepareWorkDir(ctx);
-    writePlaywrightFixture(ctx.workspaceRoot, ct.package);
+    const fixture = writePlaywrightFixture(ctx.workspaceRoot, ct.package);
+    const workerHook = pathToFileURL(path.join(hookDir, 'witness-playwright-loader.mjs')).href;
     const { extraArgs } = tsFields(ctx.settings);
     const sourceRoot = path.join(ctx.workspaceRoot, ctx.settings.sourceRoot || '');
     const wrapperPath = path.join(workDir, 'playwright-ct.config.mjs');
@@ -590,14 +588,20 @@ export class TypeScriptCoverageSource implements CoverageSource {
     // test imports in the worker and short-circuits every other loader, so
     // a function a test calls in Node, not in the page, is not counted; the
     // setup screen says so (docs/witness.md, "Not yet").
+    // The worker hook goes in through NODE_OPTIONS so Playwright's own
+    // worker processes inherit it; it answers each spec's import of the
+    // component package with the fixture.
     const witnessEnv = {
       ...env,
       DEEPTEST_WASM_DIR: this.options.wasmDir ?? runtimeEnvironment().wasmDir,
       DEEPTEST_SOURCE_ROOT: sourceRoot,
       DEEPTEST_HOOKS_DIR: hookDir,
+      DEEPTEST_FIXTURE: fixture,
+      DEEPTEST_CT_PACKAGE: ct.package,
+      NODE_OPTIONS: `${env.NODE_OPTIONS ? `${env.NODE_OPTIONS} ` : ''}--import=${workerHook}`,
     };
     const args = [path.join(cli, 'cli.js'), 'test', '-c', wrapperPath, ...splitArgs(extraArgs)];
-    ctx.log(`$ node ${args.join(' ')}`);
+    ctx.log(`$ NODE_OPTIONS=--import=${workerHook} node ${args.join(' ')}`);
     const run = await runProcess('node', args, { cwd: ctx.workspaceRoot, env: witnessEnv, log: ctx.log, signal: ctx.signal });
     if (/Executable doesn't exist|playwright install/.test(run.output) && run.exitCode !== 0) {
       throw new Error('Playwright has no browser installed for this project. Run "npx playwright install chromium" in the project, then check again.');
@@ -747,7 +751,7 @@ export class TypeScriptCoverageSource implements CoverageSource {
     // environment so a bundling runner cannot break the path.
     const hookDir = path.join(workDir, 'hooks');
     fs.mkdirSync(hookDir, { recursive: true });
-    for (const file of ['vitest.mjs', 'attribution.cjs', 'karma.cjs', 'karma-client.js', 'witness.cjs', 'witness-loader.mjs', 'witness-instrument.cjs', 'witness-vite.mjs', 'mocha.cjs']) {
+    for (const file of ['vitest.mjs', 'attribution.cjs', 'karma.cjs', 'karma-client.js', 'witness.cjs', 'witness-loader.mjs', 'witness-instrument.cjs', 'witness-vite.mjs', 'witness-playwright-loader.mjs', 'mocha.cjs']) {
       const from = path.join(this.options.hooksDir, file);
       if (fs.existsSync(from)) {
         fs.copyFileSync(from, path.join(hookDir, file));
@@ -1079,10 +1083,10 @@ export function detectPlaywrightCt(workspaceRoot: string): { package: string; co
   return { package: found, configFile: PLAYWRIGHT_CT_CONFIGS.find((f) => fs.existsSync(path.join(workspaceRoot, f))) };
 }
 
-/** Writes .deeptest/witness-playwright.ts for the project's package. Stable content, so committing it beside the tests is safe. */
+/** Writes the fixture to .deeptest/hooks/witness-playwright.ts for the project's package; the worker hook points specs at it. */
 export function writePlaywrightFixture(workspaceRoot: string, ctPackage: string): string {
   const template = fs.readFileSync(path.join(runtimeEnvironment().hooksDir, 'witness-playwright.template.ts'), 'utf8');
-  const dir = path.join(workspaceRoot, '.deeptest');
+  const dir = path.join(workspaceRoot, '.deeptest', 'hooks');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'witness-playwright.ts');
   const content = template.split('__PACKAGE__').join(ctPackage);
@@ -1092,26 +1096,12 @@ export function writePlaywrightFixture(workspaceRoot: string, ctPackage: string)
   return file;
 }
 
-/** Component test files under the tests folder (or the whole workspace), and how many import the fixture. */
-export function playwrightTestsImportingFixture(workspaceRoot: string, settings: LanguageSettings): { total: number; withFixture: number; exampleImport: string } {
+/** Component test files under the tests folder (or the whole workspace), relative to the workspace. */
+export function playwrightComponentTests(workspaceRoot: string, settings: LanguageSettings): string[] {
   const root = path.join(workspaceRoot, settings.testsPath || '');
-  const files = walkSources(root)
+  return walkSources(root)
     .map((rel) => (settings.testsPath ? `${settings.testsPath}/${rel}` : rel))
     .filter((rel) => isTestFile(rel) || /\.ct\.[cm]?[jt]sx?$/.test(rel));
-  let withFixture = 0;
-  let example = '';
-  for (const rel of files) {
-    const text = fs.readFileSync(path.join(workspaceRoot, rel), 'utf8');
-    if (/witness-playwright/.test(text)) {
-      withFixture += 1;
-    } else if (!example) {
-      example = path.relative(path.dirname(path.join(workspaceRoot, rel)), path.join(workspaceRoot, '.deeptest', 'witness-playwright')).split(path.sep).join('/');
-      if (!example.startsWith('.')) {
-        example = `./${example}`;
-      }
-    }
-  }
-  return { total: files.length, withFixture, exampleImport: example || './.deeptest/witness-playwright' };
 }
 
 /** The wrapper config: the project's own config with the Witness Vite plugin added and its relative paths re-rooted. */

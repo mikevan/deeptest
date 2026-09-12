@@ -1,5 +1,7 @@
 # UntangleIt: spec
 
+Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
+
 Draft 4, 2026-09-11 (draft 3 was 2026-09-06). A tool in MikeVan's AI Development Toolkit (`prs.untangleit`), beside KeepSafe and DeepTest. Written before any code, so the shape can be argued with.
 
 ## Name recorded 2026-09-11

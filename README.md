@@ -101,14 +101,17 @@ The three complexity numbers come from the shared library `@projectrevivesolutio
 
 ## Languages
 
-| Plugin | Runner | Per-test attribution | Structure |
+| Plugin | Runners | Per-test attribution | Structure |
 |---|---|---|---|
 | Python | pytest | coverage.py dynamic contexts, one run | tree-sitter-python |
-| TypeScript / JavaScript | Jest or Vitest | Istanbul counters snapshotted around every test by a setup hook, one run | tree-sitter typescript, tsx, javascript |
+| TypeScript / JavaScript | Jest, Vitest, Mocha | Jest and Vitest: Istanbul counters snapshotted around every test by a setup hook. Mocha: Witness, DeepTest's own instrumentation, in ES modules and CommonJS alike, no coverage package. | tree-sitter typescript, tsx, javascript |
+| React, Vue, Svelte | Jest or Vitest, as above | As above; `.vue` and `.svelte` single-file components are parsed through their script blocks on their real lines | the same grammars |
+| Angular | `ng test` with Vitest or with Karma (the `@angular/build:unit-test` builder) | Vitest: the setup hook through the builder, with the builder's bundle chunks mapped back to sources. Karma: a Jasmine reporter in the browser and a Karma reporter in the server, loaded through a generated Karma config; Chrome runs headless. | the same grammars |
+| Playwright component tests | `playwright test` with the component package | Witness in the page: a Vite plugin instruments the component build in memory and the page reports per test through a fixture DeepTest writes under `.deeptest/hooks/` and a hook in Playwright's workers points each spec's ordinary import at. Nothing in the project changes. Only what the page runs is counted. | the same grammars |
 
-Next, one minor number per language across the whole toolkit: Java (1.1), C# (1.2), C++ (1.3), then Go or PHP (1.4). JavaScript frameworks that allow testing (React, Vue, Angular, and their runners) are runner work inside the existing plugin and ship as patches. The plan and what each language must have before it ships are in docs/toolkit/toolkit-roadmap.md.
+That is the 1.0 slot of the toolkit's Language Expansion series, done. Next, one minor number per language across the whole toolkit: Java (1.1), C# (1.2), C++ or Go (1.3). The plan and what each language must have before it ships are in docs/toolkit/toolkit-roadmap.md; Witness, the instrumentation DeepTest owns, is in docs/witness.md.
 
-One contract, every language: the engine, overlay, panel, report, and setup screen know no language. Java, C#, C++, and one of PHP or Go are next.
+One contract, every language: the engine, overlay, panel, report, and setup screen know no language.
 
 ---
 
@@ -116,7 +119,11 @@ One contract, every language: the engine, overlay, panel, report, and setup scre
 
 - Visual Studio Code 1.104.0 or newer.
 - Python projects: the Python the project already uses (the one the Python extension selected, else the project's own `.venv`, else `python` on PATH) with `coverage` and `pytest` installed in it.
-- TypeScript / JavaScript projects: Node on PATH and Jest or Vitest in the project. Vitest also needs `@vitest/coverage-istanbul`; DeepTest offers the install.
+- Jest projects: Node on PATH and Jest in the project. Jest brings its own coverage.
+- Vitest projects (React, Vue, Svelte included): Node on PATH, Vitest in the project, and `@vitest/coverage-istanbul` matching the project's Vitest major; DeepTest offers the install, pinned.
+- Mocha projects: Node 22.15 or later on PATH and Mocha in the project. Nothing else: Witness instruments the sources itself.
+- Angular projects: the project's own `@angular/cli` and, for Vitest, `@vitest/coverage-istanbul` (offered); for Karma, `karma`, `karma-jasmine`, `karma-chrome-launcher`, `karma-coverage`, and `istanbul-lib-instrument`, which every Angular CLI project already has, and Chrome on the machine. The older `@angular-devkit/build-angular:karma` builder is not driven; `ng update` moves a project to `@angular/build:unit-test`.
+- Playwright component tests: the component package (`@playwright/experimental-ct-react` and friends) and Playwright's own browser (`npx playwright install chromium`), and Node 22.15 or later for the worker hook. Nothing is added to the project and no spec changes.
 
 Nothing else. No native modules, no extra extensions. If a project's `pytest.ini` turns on pytest-cov, DeepTest runs pytest without those options for its check and leaves the file alone.
 
@@ -151,6 +158,9 @@ All under `deeptest.`:
 - Line coverage is what the summary reports. coverage.py's own percentage blends in branch coverage and reads lower.
 - The density numerator is distinct test cases, not distinct assertions.
 - Recursion is found by name within one file; cross-file recursion does not add to the tangle.
+- Single-file components: the template half of a `.vue` or `.svelte` file is not parsed, so its `v-if` and `{#if}` are not decisions to DeepTest yet; template lines count for coverage as declarations.
+- Playwright component tests: only what the page runs is counted. A function a test calls in Node rather than in the page is not attributed.
+- Angular with Karma: a file no test loads gets its executable lines from the source as written rather than from the compiler's output, so a decorator or class-field line can differ from the Vitest flavour; no line with a decision differs.
 
 ---
 
@@ -169,7 +179,7 @@ Then in the Extensions view choose "Install from VSIX..." from the "..." menu, p
 
 DeepTest measures itself: point it at this repository with language `typescript`, tests folder `test`, source root `src`. The editor-facing files only run inside the integration suite, which Istanbul does not see, so they show red. That is the truth and the tool is not going to soften it for its own author.
 
-Design and contracts: `docs/toolkit/`. Engineering reasons: `docs/engineering-notes.md`. Acceptance script: `docs/uat.md`.
+Design and contracts: `docs/toolkit/`. Engineering reasons: `docs/engineering-notes.md`. Acceptance script: `docs/uat.md`. Everything under `docs/` is a mirror of the toolkit's library in `MADTPackage\library`, where the documents are written and catalogued; edit them there.
 
 ---
 

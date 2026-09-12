@@ -1,5 +1,7 @@
 # Engineering notes
 
+Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
+
 What was tried, what failed, and why the code looks the way it does.
 Kept here so nobody re-learns it the hard way.
 
@@ -1248,3 +1250,73 @@ counts every other port has (4(6) 5(1) 7(6) ...), `pickGreeting` first at
 test/witness.test.ts (the Vite plugin driven directly; detection, the
 fixture, the wrapper, the summary, and the merge for Playwright), 205 in
 all; the differential test now covers 155 files including the new port.
+
+
+## The words and the pages (1.0.8)
+
+The last delivery of the slot changes no measurement. The README's
+Languages table now says what actually shipped, runner by runner, with
+per-test attribution named for each; Requirements lists what each runner
+needs and what DeepTest offers to install (Vitest the pinned coverage
+package, Mocha Node 22.15, Angular the CLI and Chrome for Karma,
+Playwright its browser and Node 22.15); Known Limits carries the
+three honest ones from the slot (templates of single-file components not
+parsed, Playwright counting only the page, the Karma universe for files
+no test loads coming from the source). UntangleIt's test gate learned the
+two runners it lacked, Mocha and Playwright component tests (through the
+component package's own cli.js with the `playwright-ct` config named,
+since Playwright looks for `playwright.config.*` on its own), with the
+same detection order as DeepTest. The toolkit documents (roadmap,
+architecture, plan, API, MBCC paper, UntangleIt spec, and docs/witness.md)
+are copied level into UntangleIt and the pack; they had drifted by three
+drafts. The roadmap marks the 1.0 row done. Tests: one new in UntangleIt
+(16); DeepTest unchanged at 205.
+
+Then the one measurement change of the delivery, made because the owner
+read "the one line a project adds" and asked whether that meant we
+require a project to alter its code to use our tool. It did. Playwright
+gives the test boundary only through a fixture the spec imports, and
+1.0.7 accepted that as the price, with DeepTest writing the fixture and
+the setup screen naming the specs that still lacked the import. The
+price is gone. The worker that runs a Playwright test is a Node process
+and inherits NODE_OPTIONS, so the same mechanism that serves Mocha, a
+hook registered through module.registerHooks, serves Playwright's
+workers too: hooks/witness-playwright-loader.mjs registers a `resolve`
+hook that answers any import of the component package (from outside the
+fixture and outside node_modules) with DeepTest's fixture file, and the
+fixture re-exports the package whole with `test` replaced. A spec keeps
+its ordinary import and gets a `test` that reports to Witness. Proven
+first in the Linux harness against the react-playwright-ct port: 10
+passed, per-test records for every test, both specs unchanged.
+
+What moved: the fixture goes to `.deeptest/hooks/witness-playwright.ts`,
+DeepTest output like every other hook, not a project file; the
+environment check asks for Node 22.15 (the hook needs registerHooks)
+and no longer counts imports; `playwrightTestsImportingFixture` is gone;
+`decisions.json` is the only file under `.deeptest/` the fixture sync
+keeps, and the HelloWorlds port commits no `.deeptest` folder and its
+specs import `@playwright/experimental-ct-react` again. Why a `resolve`
+hook and not a `load` hook: Playwright's own loader transforms the
+files a test imports and short-circuits every other loader's `load`,
+which is why the worker's Node-side code is not measured (1.0.7); a
+`resolve` hook runs before Playwright's and only changes which file the
+import lands on, so it works under the same loader that blocks `load`.
+Why the fixture re-exports with `export *` and not a named list: a
+project may import anything the package exports (`devices`,
+`defineConfig` in a spec helper), and a local `export const test`
+shadows the star export by the language's own rule, so the one
+replacement needs no list to maintain. Tests: the Playwright test in
+test/witness.test.ts now drives the hook end to end through a stub
+package under a temporary node_modules (the spec gets the fixture's
+`test` and the package's `expect`; the fixture's own import and an
+import from inside the package get the package) and asserts the port
+commits nothing of DeepTest's; 205 tests still.
+
+Wording, because it matters to a reader who has not seen the code:
+Witness never writes to a file in the project. The loader hands Node
+instrumented text in memory in the moment between reading a file and
+running it; the Vite plugin does the same in the component build, whose
+bundle goes to a cache folder under `.deeptest/`. The only files
+DeepTest writes are its own, under `.deeptest/`, rebuilt every check.
+The README, the setup notes, and docs/witness.md now say that in those
+words.

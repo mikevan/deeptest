@@ -1,5 +1,7 @@
 # 1.0: the JavaScript frameworks. The plan.
 
+Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
+
 Draft 2, 2026-09-12 (draft 1 earlier the same day; draft 2 adds the survey's findings and the revised phase order). The first slot of the Language Expansion series (toolkit-roadmap.md). Publisher: `prs`.
 
 ## What 1.0 is, and is not

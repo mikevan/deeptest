@@ -24,9 +24,9 @@ const source = fromIndex >= 0 ? resolve(args[fromIndex + 1]) : resolve(here, '..
 const names = args.filter((a, i) => a !== '--from' && a !== '--all' && (fromIndex < 0 || i !== fromIndex + 1));
 const all = args.includes('--all');
 
-const SKIP = new Set(['node_modules', '.venv', '.keepsafe', '.untangleit', 'dist', 'coverage', '.angular', '__pycache__', '.pytest_cache', '.git', '_to_delete', '.vscode', 'test-results']);
-// Inside .deeptest/ only what travels with the code: the decisions, and the Playwright fixture the specs import.
-const KEEP_IN_DEEPTEST = new Set(['decisions.json', 'witness-playwright.ts']);
+const SKIP = new Set(['node_modules', '.venv', '.keepsafe', '.untangleit', 'dist', 'coverage', '.angular', '__pycache__', '.pytest_cache', '.git', '_to_delete', '.vscode', 'test-results', '.cache']);
+// Inside .deeptest/ only what travels with the code: the decisions.
+const KEEP_IN_DEEPTEST = new Set(['decisions.json']);
 function wanted(p) {
   const parts = p.split(/[\\/]/);
   const name = parts[parts.length - 1];

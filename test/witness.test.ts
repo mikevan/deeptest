@@ -18,7 +18,7 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { repoWasmDir } from '../src/languages/shared/treeSitter';
 import { createInstrumenter, WitnessInstrumenter } from '../src/witness/hook';
-import { nodeSupportsWitness, parseMochaSummary, detectRunner, witnessUniverse, detectPlaywrightCt, writePlaywrightFixture, playwrightTestsImportingFixture, playwrightWrapperConfig, parsePlaywrightSummary, mergePlaywrightRecords, mergeWitnessReports } from '../src/languages/typescript/coverage';
+import { nodeSupportsWitness, parseMochaSummary, detectRunner, witnessUniverse, detectPlaywrightCt, writePlaywrightFixture, playwrightComponentTests, playwrightWrapperConfig, parsePlaywrightSummary, mergePlaywrightRecords, mergeWitnessReports } from '../src/languages/typescript/coverage';
 import { runtimeEnvironment } from '../src/languages/shared/runtime';
 
 let witness: WitnessInstrumenter;
@@ -133,7 +133,7 @@ test('differential: the maps agree with istanbul-lib-instrument on every fixture
 function hooksFolder(dir: string): string {
   const hooks = path.join(dir, 'hooks');
   fs.mkdirSync(hooks, { recursive: true });
-  for (const f of ['witness.cjs', 'witness-loader.mjs', 'witness-vite.mjs', 'witness-playwright.template.ts']) {
+  for (const f of ['witness.cjs', 'witness-loader.mjs', 'witness-vite.mjs', 'witness-playwright-loader.mjs', 'witness-playwright.template.ts']) {
     fs.copyFileSync(path.join('hooks', f), path.join(hooks, f));
   }
   const bundle = process.env.DEEPTEST_TEST_BUNDLE;
@@ -285,16 +285,38 @@ test('Playwright component tests: detection, the fixture, the wrapper config, th
   assert.equal(detectPlaywrightCt(path.join('test', 'fixtures', 'jsproject-jest')), undefined);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'witness-pw-'));
   const written = writePlaywrightFixture(dir, '@playwright/experimental-ct-vue');
+  assert.equal(path.relative(dir, written).split(path.sep).join('/'), '.deeptest/hooks/witness-playwright.ts', 'the fixture is DeepTest output, not a project file');
   const text = fs.readFileSync(written, 'utf8');
-  assert.match(text, /from '@playwright\/experimental-ct-vue'/);
+  assert.match(text, /import \{ test as base \} from '@playwright\/experimental-ct-vue'/);
+  assert.match(text, /export \* from '@playwright\/experimental-ct-vue'/, 'the fixture is the package, whole, with test replaced');
   assert.doesNotMatch(text, /__PACKAGE__/);
-  assert.equal(fs.readFileSync(path.join(fixture, '.deeptest', 'witness-playwright.ts'), 'utf8'), fs.readFileSync(path.join(runtimeEnvironment().hooksDir, 'witness-playwright.template.ts'), 'utf8').split('__PACKAGE__').join('@playwright/experimental-ct-react'), 'the fixture in HelloWorlds is the template, filled in');
-  const importing = playwrightTestsImportingFixture(fixture, { testsPath: '', sourceRoot: 'src', fields: {} });
-  assert.deepEqual(importing, { total: 2, withFixture: 2, exampleImport: './.deeptest/witness-playwright' });
-  fs.mkdirSync(path.join(dir, 'src', 'deep'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'src', 'deep', 'a.spec.tsx'), "import { test } from '@playwright/experimental-ct-vue';");
-  const none = playwrightTestsImportingFixture(dir, { testsPath: '', sourceRoot: 'src', fields: {} });
-  assert.deepEqual(none, { total: 1, withFixture: 0, exampleImport: '../../.deeptest/witness-playwright' }, 'the example import is relative to the spec that lacks it');
+  assert.equal(fs.existsSync(path.join(fixture, '.deeptest')), false, 'the port commits nothing of DeepTest\'s');
+  assert.deepEqual(playwrightComponentTests(fixture, { testsPath: '', sourceRoot: 'src', fields: {} }).sort(), ['src/components/Greeting.spec.tsx', 'src/components/NameTag.spec.tsx']);
+  for (const spec of playwrightComponentTests(fixture, { testsPath: '', sourceRoot: 'src', fields: {} })) {
+    assert.match(fs.readFileSync(path.join(fixture, spec), 'utf8'), /from '@playwright\/experimental-ct-react'/, `${spec} imports the package, not a DeepTest file`);
+  }
+  // The worker hook, end to end: a spec imports the package and gets the
+  // fixture; the fixture's own import of the package, and an import from
+  // inside node_modules, get the package.
+  if (nodeSupportsWitness(process.version)) {
+    const pkg = path.join(dir, 'node_modules', '@playwright', 'experimental-ct-vue');
+    fs.mkdirSync(pkg, { recursive: true });
+    fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: '@playwright/experimental-ct-vue', type: 'module', main: 'index.js' }));
+    fs.writeFileSync(path.join(pkg, 'index.js'), "export const test = 'package test'; export const expect = 'package expect';\n");
+    const helper = path.join(dir, 'node_modules', 'helper');
+    fs.mkdirSync(helper, { recursive: true });
+    fs.writeFileSync(path.join(helper, 'package.json'), JSON.stringify({ name: 'helper', type: 'module', main: 'index.js' }));
+    fs.writeFileSync(path.join(helper, 'index.js'), "import { test } from '@playwright/experimental-ct-vue'; export const deeper = test;\n");
+    const fixtureFile = path.join(dir, '.deeptest', 'hooks', 'witness-playwright.mjs');
+    fs.writeFileSync(fixtureFile, "import { test as base } from '@playwright/experimental-ct-vue';\nexport * from '@playwright/experimental-ct-vue';\nexport const test = `witness over ${base}`;\n");
+    fs.writeFileSync(path.join(dir, 'a.spec.mjs'), "import { test, expect } from '@playwright/experimental-ct-vue';\nimport { deeper } from 'helper';\nconsole.log(JSON.stringify({ test, expect, deeper }));\n");
+    const stdout = execFileSync(process.execPath, ['--no-warnings', '--import', pathToFileURL(path.resolve('hooks', 'witness-playwright-loader.mjs')).href, path.join(dir, 'a.spec.mjs')], {
+      cwd: dir,
+      stdio: 'pipe',
+      env: { ...process.env, DEEPTEST_FIXTURE: fixtureFile, DEEPTEST_CT_PACKAGE: '@playwright/experimental-ct-vue' },
+    }).toString();
+    assert.deepEqual(JSON.parse(stdout), { test: 'witness over package test', expect: 'package expect', deeper: 'package test' }, 'the spec gets the fixture\'s test and the package\'s everything else; a package under node_modules gets the package');
+  }
   const wrapper = playwrightWrapperConfig(dir, 'playwright-ct.config.ts');
   assert.match(wrapper, /^import base from "file:\/\/\//m);
   assert.match(wrapper, /ctCacheDir: path\.join\(here, 'playwright-cache'\)/, 'its own build cache, since Playwright would reuse a bundle built without the plugin');

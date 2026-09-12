@@ -1,9 +1,11 @@
 /**
- * DeepTest's fixture for Playwright. Generated into .deeptest/witness-playwright.ts
- * on every check; import `test` and `expect` from it instead of from
- * __PACKAGE__ and every test in that file reports, per test, the lines it
- * reached, the decisions it took, and the functions it entered. This is the
- * one line a project adds; DeepTest never edits a test itself.
+ * DeepTest's fixture for Playwright. Generated into .deeptest/hooks/ on
+ * every check and never imported by a spec: the worker hook
+ * (witness-playwright-loader.mjs) answers each spec's import of
+ * __PACKAGE__ with this file, which re-exports the package whole and
+ * replaces `test` with one that reports, per test, the lines it reached,
+ * the decisions it took, and the functions it entered. A spec keeps its
+ * ordinary import and DeepTest never edits a test.
  *
  * Each test runs in its own page, so the page's counters at the end of the
  * test are that test's attribution, and the page is reset afterwards in case
@@ -12,7 +14,9 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { test as base, expect } from '__PACKAGE__';
+import { test as base } from '__PACKAGE__';
+
+export * from '__PACKAGE__';
 
 export const test = base.extend<{ witness: void }>({
   witness: [
@@ -42,5 +46,3 @@ export const test = base.extend<{ witness: void }>({
     { auto: true },
   ],
 });
-
-export { expect };

@@ -59,7 +59,7 @@ async function detect(workspaceRoot: string, _host: HostServices): Promise<Detec
   } else if (detectPlaywrightCt(workspaceRoot)) {
     const ct = detectPlaywrightCt(workspaceRoot)!;
     notes.push(`Found Playwright component tests (${ct.package}${ct.configFile ? `, configured in ${ct.configFile}` : ''}).`);
-    notes.push('They are measured through Witness, which instruments the component build and reads the page; each component test file imports test and expect from .deeptest/witness-playwright.ts, the one line a project adds. Only what the page runs is counted. Nothing needs installing beyond Playwright\'s own browser.');
+    notes.push('They are measured through Witness, which instruments the component build in memory and reads the page after each test. Nothing in the project changes: not a spec, not the config, not a dependency. Only what the page runs is counted. Nothing needs installing beyond Playwright\'s own browser, and Node 22.15 or later.');
   } else if (runner) {
     const cfg =
       runner === 'vitest'
