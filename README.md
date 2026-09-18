@@ -104,12 +104,12 @@ The three complexity numbers come from the shared library `@projectrevivesolutio
 | Plugin | Runners | Per-test attribution | Structure |
 |---|---|---|---|
 | Python | pytest | coverage.py dynamic contexts, one run | tree-sitter-python |
-| TypeScript / JavaScript | Jest, Vitest, Mocha | Jest and Vitest: Istanbul counters snapshotted around every test by a setup hook. Mocha: Witness, DeepTest's own instrumentation, in ES modules and CommonJS alike, no coverage package. | tree-sitter typescript, tsx, javascript |
+| TypeScript / JavaScript | Jest, Vitest, Mocha | Jest and Vitest: Istanbul counters snapshotted around every test by a setup hook. Mocha: Witness, the toolkit's own instrumentation, in ES modules and CommonJS alike, no coverage package. | tree-sitter typescript, tsx, javascript |
 | React, Vue, Svelte | Jest or Vitest, as above | As above; `.vue` and `.svelte` single-file components are parsed through their script blocks on their real lines | the same grammars |
 | Angular | `ng test` with Vitest or with Karma (the `@angular/build:unit-test` builder) | Vitest: the setup hook through the builder, with the builder's bundle chunks mapped back to sources. Karma: a Jasmine reporter in the browser and a Karma reporter in the server, loaded through a generated Karma config; Chrome runs headless. | the same grammars |
 | Playwright component tests | `playwright test` with the component package | Witness in the page: a Vite plugin instruments the component build in memory and the page reports per test through a fixture DeepTest writes under `.deeptest/hooks/` and a hook in Playwright's workers points each spec's ordinary import at. Nothing in the project changes. Only what the page runs is counted. | the same grammars |
 
-That is the 1.0 slot of the toolkit's Language Expansion series, done. Next, one minor number per language across the whole toolkit: Java (1.1), C# (1.2), C++ or Go (1.3). The plan and what each language must have before it ships are in docs/toolkit/toolkit-roadmap.md; Witness, the instrumentation DeepTest owns, is in docs/witness.md.
+That is the 1.0 slot of the toolkit's Language Expansion series, done. Next, one minor number per language across the whole toolkit: Java (1.1), C# (1.2), C++ or Go (1.3). The plan and what each language must have before it ships are in docs/toolkit/toolkit-roadmap.md; Witness, the instrumentation the toolkit owns (`@projectrevivesolutions/witness`, bundled into DeepTest), is in docs/witness.md.
 
 One contract, every language: the engine, overlay, panel, report, and setup screen know no language.
 

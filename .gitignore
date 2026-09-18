@@ -15,3 +15,6 @@ test/fixtures/pyproject/.vscode/
 
 # Fixture copies of the HelloWorlds ports (scripts/sync-fixtures.mjs) install their own dependencies when a test needs them.
 test/fixtures/helloworld-*/node_modules/
+# UntangleIt's working files, when UntangleIt measures this project; the run record travels with the code.
+.untangleit/*
+!.untangleit/runs.json

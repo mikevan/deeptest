@@ -2,7 +2,7 @@
 
 Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
 
-Draft 3, 2026-09-12 (draft 1 earlier the same day; draft 2 added the Vite plugin, the Playwright fixture, and the engine-counter survey; draft 3 removes the import line from Playwright projects through the worker hook). Born inside DeepTest under `src/witness/` and `hooks/`; it becomes its own library, `@projectrevivesolutions/witness`, when UntangleIt needs it (see "Where it lives").
+Draft 4, 2026-09-12 (draft 1 earlier the same day; draft 2 added the Vite plugin, the Playwright fixture, and the engine-counter survey; draft 3 removed the import line from Playwright projects through the worker hook; draft 4 records the move to its own library). Born inside DeepTest under `src/witness/` and `hooks/` in 1.0.6, proven on the ports through 1.0.8, and its own library, `@projectrevivesolutions/witness` at `C:\workspace\MikeVan's AI Development Toolkit\Witness`, from 1.0.9 (see "Where it lives").
 
 ## 1. Why it exists
 
@@ -14,7 +14,7 @@ The fix that does not cut a corner is for DeepTest to own the instrumentation. W
 
 The counters, the per-test attribution, and the executable-line universe of every file come from one instrumenter. A file a test loaded and a file no test loaded are measured by the same rules, so the universe and the hits agree by construction. Where a project's own tooling instruments for us (Jest, Vitest, the Angular builder), that tooling stays in charge and Witness stays out; where nothing does, Witness does all of it.
 
-## 3. The instrumenter (`src/witness/instrument.ts`)
+## 3. The instrumenter (`src/instrument.ts`)
 
 Textual, on tree-sitter. The source is parsed with the same grammars DeepTest uses for routes and depth, and counters are inserted into the text on the same line as the thing they count. Nothing is regenerated, so every line number in the instrumented file is the line number in the editor, and there is no source map to be wrong. Because one tree decides both what the analysis calls a decision and where a counter goes, the two cannot drift.
 
@@ -63,7 +63,7 @@ The engine counters were surveyed for this runner and work: a reporter attached 
 
 ## 6. What proves it
 
-`test/witness.test.ts`, all under `npm test`:
+`test/witness.test.ts`, all under `npm test`, in the Witness tree and in DeepTest's:
 
 - The rewrite is a valid program (`node --check`), keeps the line count, and puts the counters where the rules above say.
 - Every statement shape named in section 3, in one source, checked by pattern.
@@ -72,13 +72,15 @@ The engine counters were surveyed for this runner and work: a reporter attached 
 - The loader, end to end in a child Node: an ES module, a CommonJS module, a TypeScript villain, and a file nobody loads, with the per-test lines, outcomes, and entries asserted; and the instrumented villain compared with an untouched copy of itself on 384 inputs, which must all agree, so the rewrite is proven not to change the program it measures.
 - The universe of files no test loads, from the same instrumenter.
 - The Vite plugin, driven directly: a component under the root comes back instrumented with its maps embedded and its lines intact, a spec and a file outside the root come back untouched, and the HTML hook injects the runtime verbatim.
-- Playwright: detection on the HelloWorlds port, the fixture written for another framework's package under `.deeptest/hooks/` with `export *`, the port's specs importing the package and committing no `.deeptest` folder, the worker hook end to end (a stub package under a temporary `node_modules`; the spec gets the fixture's `test` and the package's `expect`, and the fixture's own import and an import from inside the package get the package), the wrapper config's re-rooting and cache folder, the summary parser, and two tests' page records merged into per-test attribution and a summed whole-run report.
+- The Playwright worker hook end to end: a stub package under a temporary `node_modules`; the spec gets the fixture's `test` and the package's `expect`, and the fixture's own import and an import from a package under `node_modules` get the package.
+
+From 1.0.9 the first six of those run in the Witness tree (`test/witness.test.ts` there, over its own source, hooks, and three fixture ports) and DeepTest's `test/witness.test.ts` keeps what DeepTest adds: the differential test over every fixture project and DeepTest's own source, the universe of files no test loads, and the Mocha and Playwright drivers (detection, the fixture DeepTest writes under `.deeptest/hooks/` with `export *`, the port's specs importing the package and committing no `.deeptest` folder, the wrapper config's re-rooting and cache folder, the summary parsers, and two tests' page records merged into per-test attribution and a summed whole-run report).
 
 In the harness the same instrumenter was also run against the whole source of UntangleIt and the complexity library (128 files identical with Istanbul), and the per-test attribution on the Mocha ports was compared with nyc's, line for line on all ten tests.
 
 ## 7. Where it lives, and the rule between the tools
 
-Witness is born in DeepTest so it can be proven on the ports before anything depends on it. When UntangleIt needs it (the behavioural fingerprint gate, the runtime call graph), it moves to its own library, `@projectrevivesolutions/witness`, at `C:\workspace\Witness`, the fifth tree in `release.ps1` (`complexity`, `Witness`, `UntangleIt`, `DeepTest`, `MADTPackage`). It is not part of `complexity`: that is a pure measurement library with no file system and no process, and it stays that way.
+Witness was born in DeepTest so it could be proven on the ports before anything depended on it, and from 1.0.9 it is its own library, `@projectrevivesolutions/witness`, at `C:\workspace\MikeVan's AI Development Toolkit\Witness`, the second tree in `release.ps1` (`complexity`, `Witness`, `UntangleIt`, `DeepTest`, `MADTPackage`), at the toolkit's version. It holds `src/instrument.ts`, `src/hook.ts`, `src/treeSitter.ts`, and `src/index.ts` (the library entry), the hooks under `hooks/`, the three grammars under `vendor/`, and its own suite; `npm run build` writes `dist/index.js`, `dist/hooks/` (the hook files and the bundled instrumenter `witness-instrument.cjs`), and the grammars beside them. A tool takes `createInstrumenter` for its own process, copies `HOOK_FILES` from `hooksDir()` into its own folder in a project, and sets the environment `ENV` names on the process it launches: `WITNESS_HOOKS_DIR`, `WITNESS_WASM_DIR`, `WITNESS_SOURCE_ROOT`, `WITNESS_COVERAGE_DIR`, `WITNESS_ATTRIBUTION_DIR`, and for Playwright `WITNESS_FIXTURE` and `WITNESS_CT_PACKAGE`. The hooks read only those names, so any tool can drive them. It is not part of `complexity`: that is a pure measurement library with no file system and no process, and it stays that way.
 
 There are no runtime dependencies between DeepTest and UntangleIt, because they are not always both installed. Witness is bundled into each extension at build time, the way the complexity library is, and each extension copies its own hooks into its own folder in the project (`.deeptest/hooks/`, `.untangleit/hooks/`). Nothing is ever resolved from the other extension.
 

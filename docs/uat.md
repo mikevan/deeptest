@@ -10,17 +10,17 @@ else, that is a finding, and the text you saw is the bug report.
 Setup once, in PowerShell:
 
 ```powershell
-cd C:\workspace\DeepTest
+cd C:\workspace\MikeVan's AI Development Toolkit\DeepTest
 npm install
 npm run build
 npx @vscode/vsce package --no-dependencies
 ```
 
-The last command prints "DONE  Packaged: C:\workspace\DeepTest\deeptest-0.4.0.vsix".
+The last command prints "DONE  Packaged: C:\workspace\MikeVan's AI Development Toolkit\DeepTest\deeptest-0.4.0.vsix".
 Then, in VS Code, press Ctrl+Shift+X to open the Extensions view. At the top
 right of that view click the "..." button (its tooltip reads "Views and More
 Actions..."), choose "Install from VSIX...", pick
-`C:\workspace\DeepTest\deeptest-0.4.0.vsix`, and click "Install". A
+`C:\workspace\MikeVan's AI Development Toolkit\DeepTest\deeptest-0.4.0.vsix`, and click "Install". A
 notification says "Completed installing DeepTest extension from VSIX." and
 offers "Restart Extensions"; click it. The DeepTest icon appears in the
 activity bar on the left, and the panel's title bar reads "DeepTest" followed
@@ -31,7 +31,7 @@ you which build is running.
 To remove it later: open DeepTest's page in the Extensions view and click "Uninstall".
 
 Every case below happens in VS Code with a fixture project open. The
-fixture projects live under `C:\workspace\DeepTest\test\fixtures\`.
+fixture projects live under `C:\workspace\MikeVan's AI Development Toolkit\DeepTest\test\fixtures\`.
 
 ## A. First contact
 

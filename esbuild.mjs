@@ -43,6 +43,14 @@ mkdirSync('dist/hooks', { recursive: true });
 for (const file of readdirSync('hooks')) {
   copyFileSync(`hooks/${file}`, `dist/hooks/${file}`);
 }
+// The Witness hooks (runtime, loaders, Vite plugin, Playwright hook and
+// fixture, Mocha boundary, and the bundled instrumenter) come from the
+// library and ship beside DeepTest's own hooks. The library's index is
+// bundled into extension.js, so its hooksDir() is dist/hooks at runtime.
+const witnessHooks = 'node_modules/@projectrevivesolutions/witness/dist/hooks';
+for (const file of readdirSync(witnessHooks)) {
+  copyFileSync(`${witnessHooks}/${file}`, `dist/hooks/${file}`);
+}
 for (const file of readdirSync('vendor')) {
   if (file.endsWith('.wasm')) {
     copyFileSync(`vendor/${file}`, `dist/${file}`);
@@ -62,28 +70,9 @@ const ctx = await esbuild.context({
   logLevel: 'info',
 });
 
-// The Witness instrumenter runs inside the project's own Node process, where
-// DeepTest's node_modules does not exist, so it is bundled whole (web-tree-sitter
-// included) into one CommonJS file beside the other hooks. The grammars stay
-// in dist/ and the loader reads them from DEEPTEST_WASM_DIR.
-const witness = await esbuild.context({
-  entryPoints: ['src/witness/hook.ts'],
-  bundle: true,
-  platform: 'node',
-  format: 'cjs',
-  target: 'node22',
-  outfile: 'dist/hooks/witness-instrument.cjs',
-  plugins: [treeSitterCjs],
-  sourcemap: false,
-  logLevel: 'info',
-});
-
 if (watch) {
   await ctx.watch();
-  await witness.watch();
 } else {
   await ctx.rebuild();
-  await witness.rebuild();
   await ctx.dispose();
-  await witness.dispose();
 }

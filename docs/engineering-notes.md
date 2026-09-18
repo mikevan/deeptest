@@ -1252,6 +1252,49 @@ fixture, the wrapper, the summary, and the merge for Playwright), 205 in
 all; the differential test now covers 155 files including the new port.
 
 
+## Witness leaves the tree (1.0.9)
+
+Witness was born inside DeepTest on purpose (1.0.6): proven on the ports
+before anything depended on it. The plan had it moving out when
+UntangleIt first needed it. The owner moved that up: a shared language
+between the two tools has to be a library both import, not code one of
+them happens to hold, and UntangleIt's behaviour gate is the next work.
+So 1.0.9 is the move and nothing else measured changes, which the ports
+prove (node-mocha and react-playwright-ct give the 1.0.8 numbers to the
+line).
+
+What moved: src/witness/instrument.ts and hook.ts, a copy of the shared
+tree-sitter loader, the six hook files, the esbuild step that bundles the
+instrumenter with web-tree-sitter, the three JavaScript grammars, and the
+tests that prove the library on its own (the rewrite, every statement
+shape, the non-null blanking, the loader end to end, the Vite plugin, the
+Playwright worker hook, and a differential test over the library's own
+source and three fixture ports). DeepTest keeps its differential test over
+every fixture project and its own source, the universe, and the Mocha and
+Playwright driver tests: 200 tests here, 7 there.
+
+Three decisions. The hooks read `WITNESS_*` environment names now, not
+`DEEPTEST_*`: a library that two tools drive cannot carry one tool's name
+in its contract, and the names are exported as `ENV` so a tool cannot
+misspell one. DeepTest sets both families, since its own hooks
+(vitest.mjs, attribution.cjs, karma.cjs) still read `DEEPTEST_*`.
+Second, how a bundled extension finds the hook files: the package's
+`hooksDir()` is `path.join(__dirname, 'hooks')`, and esbuild bundles the
+package index into dist/extension.js, so at runtime `__dirname` is
+DeepTest's dist and `hooksDir()` is dist/hooks, where esbuild.mjs copies
+the package's built hooks beside DeepTest's own; in a checkout the same
+call resolves to node_modules/@projectrevivesolutions/witness/dist/hooks,
+so the tests and the extension take one path. Third, the grammars:
+Witness ships its own three in dist/ for a consumer that has none, but
+DeepTest keeps pointing the hooks at its own dist (which also holds
+Python's), so nothing is loaded twice.
+
+Also in this delivery: every tree now lives under
+C:\workspace\MikeVan's AI Development Toolkit\ and release.ps1's root,
+the fixture sync's HelloWorlds path, and the documents' paths follow;
+release.ps1 aligns five trees, Witness second, and mirrors witness.md
+into the Witness tree too.
+
 ## The words and the pages (1.0.8)
 
 The last delivery of the slot changes no measurement. The README's

@@ -2,8 +2,8 @@
 
 Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
 
-Updated 2026-09-12 (1.0.8, in the tree). The 1.0 slot is complete at this build. Companion to vscode-density-extension-spec.md.
-Source tree and VSIX live at C:\workspace\DeepTest on Michael's machine. The
+Updated 2026-09-12 (1.0.9, in the tree). Companion to vscode-density-extension-spec.md.
+Source tree and VSIX live at C:\workspace\MikeVan's AI Development Toolkit\DeepTest on Michael's machine. The
 authoritative copy of this file is docs/build-status.md in that tree.
 Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
 33fb006 "Pytest addopts no longer break the run" (0.3.8), 1fb82e5
@@ -17,7 +17,28 @@ pack, and the library). From here the minor number moves once per language
 across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
 numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
 
-## 2026-09-12, 1.0.8: the words and the pages; the 1.0 slot is done
+## 2026-09-12, 1.0.9: Witness is its own library
+
+- src/witness/ and the Witness hooks (witness.cjs, witness-loader.mjs,
+  witness-vite.mjs, witness-playwright-loader.mjs,
+  witness-playwright.template.ts, mocha.cjs) leave DeepTest for
+  C:\workspace\MikeVan's AI Development Toolkit\Witness,
+  `@projectrevivesolutions/witness`, a `file:../Witness` dependency like
+  complexity. coverage.ts imports createInstrumenter, hooksDir, HOOK_FILES,
+  ENV, and nodeSupportsWitness from it; prepareWorkDir copies the Witness
+  hooks from the package's dist/hooks beside DeepTest's own; the drivers
+  set WITNESS_* beside DEEPTEST_*; esbuild copies the package's hooks into
+  dist/hooks (the package index is bundled into extension.js, so hooksDir()
+  is dist/hooks at runtime). No measurement changed. 200 tests (the five
+  library tests now run in the Witness tree, which has 7).
+- Verify: after `npm install` in Witness and in DeepTest, `npm test` in
+  Witness passes 7 and in DeepTest 200; on HelloWorlds\node-mocha the panel
+  shows 10 tests passed and pickGreeting first at 27/73/97; on
+  HelloWorlds\react-playwright-ct 10 tests passed, greet.ts 4(6) 5(1) 7(6),
+  pickGreeting 27/73/97; .deeptest\hooks in either project holds
+  witness-instrument.cjs beside witness.cjs.
+
+## 2026-09-12, 1.0.8: the words and the pages
 
 - README Languages, Requirements, and Known Limits say what shipped;
   UntangleIt's test gate drives Mocha and Playwright component tests; the
@@ -216,7 +237,7 @@ numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
   first).
 - Test count is 180, not 207: commit 1fb82e5 moved the three cognitive.ts
   walkers and test/cognitive.test.ts (27 whitepaper tests) into
-  `@projectrevivesolutions/complexity` at C:\workspace\complexity.
+  `@projectrevivesolutions/complexity` at C:\workspace\MikeVan's AI Development Toolkit\complexity.
 - Field note: on a production Python project DeepTest prompted "This Python
   is missing coverage." with an "Install coverage" button. By design
   (toolkit principle 5, the project's own runtime); coverage.py must import
@@ -261,7 +282,7 @@ numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
 - Demo project for GIFs: C:\workspace\HelloWorld (Python, pytest, 10
   tests, .venv with pytest, pytest-cov, coverage). schedule.py holds
   pick_greeting(), nested five deep with no tests.
-- The pack: C:\workspace\MADTPackage, repo mikevan/MADTPackage, id
+- The pack: C:\workspace\MikeVan's AI Development Toolkit\MADTPackage, repo mikevan/MADTPackage, id
   prs.MADTPackage, listing KeepSafe.keepsafe, prs.deeptest, prs.untangleit.
 - Sibling named UntangleIt on 2026-09-11 after the Marketplace refused its
   first display name.
@@ -312,10 +333,10 @@ anything in Regalia until after a demo.
 ## Run it (PowerShell)
 
 ```powershell
-cd C:\workspace\complexity
+cd C:\workspace\MikeVan's AI Development Toolkit\complexity
 npm test                                        # 33 tests
 npm run build                                   # both extensions bundle its dist
-cd C:\workspace\DeepTest
+cd C:\workspace\MikeVan's AI Development Toolkit\DeepTest
 npm install
 npm test                                        # 185 tests
 npm run build

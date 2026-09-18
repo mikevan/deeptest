@@ -20,7 +20,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = resolve(here, '..', 'test', 'fixtures');
 const args = process.argv.slice(2);
 const fromIndex = args.indexOf('--from');
-const source = fromIndex >= 0 ? resolve(args[fromIndex + 1]) : resolve(here, '..', '..', 'HelloWorlds');
+const source = fromIndex >= 0 ? resolve(args[fromIndex + 1]) : resolve(here, '..', '..', '..', 'HelloWorlds');
 const names = args.filter((a, i) => a !== '--from' && a !== '--all' && (fromIndex < 0 || i !== fromIndex + 1));
 const all = args.includes('--all');
 

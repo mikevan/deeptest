@@ -25,7 +25,9 @@ import { FileCoverage } from '../../engine/types';
 import { runProcess } from '../shared/process';
 import { CoverageRun, CoverageSource, EnvironmentCheck, LanguageSettings, RunContext, TestRunSummary } from '../types';
 import { detectAngularKarmaConfig, detectAngularRunnerConfig, detectFramework } from './framework';
-import { createInstrumenter } from '../../witness/hook';
+import { createInstrumenter, hooksDir as witnessHooksDir, HOOK_FILES as WITNESS_HOOK_FILES, ENV as WITNESS_ENV, nodeSupportsWitness } from '@projectrevivesolutions/witness';
+
+export { nodeSupportsWitness };
 import { pathToFileURL } from 'node:url';
 import { runtimeEnvironment } from '../shared/runtime';
 
@@ -512,9 +514,9 @@ export class TypeScriptCoverageSource implements CoverageSource {
     const witnessEnv = {
       ...env,
       NODE_OPTIONS: `${env.NODE_OPTIONS ? `${env.NODE_OPTIONS} ` : ''}--import=${loader}`,
-      DEEPTEST_WASM_DIR: this.options.wasmDir ?? runtimeEnvironment().wasmDir,
-      DEEPTEST_SOURCE_ROOT: sourceRoot,
-      DEEPTEST_COVERAGE_DIR: coverageDir,
+      [WITNESS_ENV.wasmDir]: this.options.wasmDir ?? runtimeEnvironment().wasmDir,
+      [WITNESS_ENV.sourceRoot]: sourceRoot,
+      [WITNESS_ENV.coverageDir]: coverageDir,
     };
     const args = [path.join(mochaDir, 'bin', 'mocha.js'), '--require', path.join(hookDir, 'mocha.cjs'), ...splitArgs(extraArgs), ...(testsPath ? [`${testsPath}/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}`] : [])];
     ctx.log(`$ NODE_OPTIONS=--import=${loader} node ${args.join(' ')}`);
@@ -593,11 +595,10 @@ export class TypeScriptCoverageSource implements CoverageSource {
     // component package with the fixture.
     const witnessEnv = {
       ...env,
-      DEEPTEST_WASM_DIR: this.options.wasmDir ?? runtimeEnvironment().wasmDir,
-      DEEPTEST_SOURCE_ROOT: sourceRoot,
-      DEEPTEST_HOOKS_DIR: hookDir,
-      DEEPTEST_FIXTURE: fixture,
-      DEEPTEST_CT_PACKAGE: ct.package,
+      [WITNESS_ENV.wasmDir]: this.options.wasmDir ?? runtimeEnvironment().wasmDir,
+      [WITNESS_ENV.sourceRoot]: sourceRoot,
+      [WITNESS_ENV.fixture]: fixture,
+      [WITNESS_ENV.ctPackage]: ct.package,
       NODE_OPTIONS: `${env.NODE_OPTIONS ? `${env.NODE_OPTIONS} ` : ''}--import=${workerHook}`,
     };
     const args = [path.join(cli, 'cli.js'), 'test', '-c', wrapperPath, ...splitArgs(extraArgs)];
@@ -751,14 +752,23 @@ export class TypeScriptCoverageSource implements CoverageSource {
     // environment so a bundling runner cannot break the path.
     const hookDir = path.join(workDir, 'hooks');
     fs.mkdirSync(hookDir, { recursive: true });
-    for (const file of ['vitest.mjs', 'attribution.cjs', 'karma.cjs', 'karma-client.js', 'witness.cjs', 'witness-loader.mjs', 'witness-instrument.cjs', 'witness-vite.mjs', 'witness-playwright-loader.mjs', 'mocha.cjs']) {
+    for (const file of ['vitest.mjs', 'attribution.cjs', 'karma.cjs', 'karma-client.js']) {
       const from = path.join(this.options.hooksDir, file);
       if (fs.existsSync(from)) {
         fs.copyFileSync(from, path.join(hookDir, file));
       }
     }
+    // The Witness hooks come from the library (bundled into this extension,
+    // so hooksDir() is dist/hooks at runtime and the package's dist in a
+    // checkout); they sit beside DeepTest's own hooks in the same folder.
+    for (const file of WITNESS_HOOK_FILES) {
+      const from = path.join(witnessHooksDir(), file);
+      if (fs.existsSync(from)) {
+        fs.copyFileSync(from, path.join(hookDir, file));
+      }
+    }
     ctx.log(`Hook copied into ${hookDir}.`);
-    const env = { ...process.env, DEEPTEST_ATTRIBUTION_DIR: attrDir, DEEPTEST_HOOKS_DIR: hookDir, CI: process.env.CI ?? 'true', NO_COLOR: '1', FORCE_COLOR: '0' };
+    const env = { ...process.env, DEEPTEST_ATTRIBUTION_DIR: attrDir, DEEPTEST_HOOKS_DIR: hookDir, [WITNESS_ENV.attributionDir]: attrDir, [WITNESS_ENV.hooksDir]: hookDir, CI: process.env.CI ?? 'true', NO_COLOR: '1', FORCE_COLOR: '0' };
     return { workDir, attrDir, coverageDir, hookDir, env };
   }
 
@@ -1016,16 +1026,6 @@ export function angularCliBin(workspaceRoot: string): string | undefined {
   return fs.existsSync(bin) ? bin : undefined;
 }
 
-/** module.registerHooks exists from Node 22.15.0 and 23.5.0 ("Modules: node:module API", https://nodejs.org/api/module.html). */
-export function nodeSupportsWitness(version: string): boolean {
-  const m = /v?(\d+)\.(\d+)\.(\d+)/.exec(version);
-  if (!m) {
-    return false;
-  }
-  const [major, minor] = [Number(m[1]), Number(m[2])];
-  return major > 23 || (major === 23 && minor >= 5) || (major === 22 && minor >= 15);
-}
-
 /** Mocha's summary: "10 passing (5ms)", "2 failing", "1 pending". */
 export function parseMochaSummary(output: string, exitCode: number | null): TestRunSummary {
   const summary: TestRunSummary = { passed: 0, failed: 0, errors: 0, skipped: 0, exitCode };
@@ -1085,7 +1085,7 @@ export function detectPlaywrightCt(workspaceRoot: string): { package: string; co
 
 /** Writes the fixture to .deeptest/hooks/witness-playwright.ts for the project's package; the worker hook points specs at it. */
 export function writePlaywrightFixture(workspaceRoot: string, ctPackage: string): string {
-  const template = fs.readFileSync(path.join(runtimeEnvironment().hooksDir, 'witness-playwright.template.ts'), 'utf8');
+  const template = fs.readFileSync(path.join(witnessHooksDir(), 'witness-playwright.template.ts'), 'utf8');
   const dir = path.join(workspaceRoot, '.deeptest', 'hooks');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'witness-playwright.ts');
@@ -1116,7 +1116,7 @@ export function playwrightWrapperConfig(workspaceRoot: string, configFile: strin
     "const here = path.dirname(fileURLToPath(import.meta.url));",
     `const projectRoot = ${JSON.stringify(workspaceRoot)};`,
     "const abs = (p) => (typeof p === 'string' && !path.isAbsolute(p) ? path.resolve(projectRoot, p) : p);",
-    "const plugin = witnessPlugin({ hooksDir: path.join(here, 'hooks'), wasmDir: process.env.DEEPTEST_WASM_DIR, sourceRoot: process.env.DEEPTEST_SOURCE_ROOT });",
+    "const plugin = witnessPlugin({ hooksDir: path.join(here, 'hooks'), wasmDir: process.env.WITNESS_WASM_DIR, sourceRoot: process.env.WITNESS_SOURCE_ROOT });",
     'function withWitness(use) {',
     "  // Playwright joins ctTemplateDir onto the config's own folder with path.join, so it stays relative to .deeptest/.",
     "  // Playwright reuses a built bundle when its sources and dependencies are unchanged, config included, so the Witness build lives in its own cache folder, emptied before every run.",

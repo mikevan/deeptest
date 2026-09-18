@@ -96,7 +96,7 @@ Flat cut shapes on a black ground in KeepSafe's orange and green, one object per
 
 ## 11. What is open
 
-- Witness moves out of DeepTest into `C:\workspace\Witness` when UntangleIt needs it; Jest, Vitest, and the Angular runners then move onto it, so every runner is an instrumenter, a transport, and a boundary on one attribution core. The engine counters (V8 precise coverage through `node:inspector` and the DevTools protocol) are its path for code it cannot transform.
+- Witness is its own library at `C:\workspace\MikeVan's AI Development Toolkit\Witness` from 1.0.9, bundled into DeepTest and declared by UntangleIt for its behaviour gate; Jest, Vitest, and the Angular runners move onto it next, so every runner is an instrumenter, a transport, and a boundary on one attribution core. The engine counters (V8 precise coverage through `node:inspector` and the DevTools protocol) are its path for code it cannot transform.
 
 - The switch-case counting rule for ways through in DeepTest (a case as one decision versus cumulative). For tangle it is settled: a switch is one. UntangleIt's dispatch-table transform is therefore never a tangle job; it lives only in the extension-point rule of the spec.
 - Whether the "ledger" that joins checkpoints to verdicts is a fourth tool or a feature of DeepTest, given KeepSafe stays untouched.
