@@ -1,8 +1,22 @@
-# MikeVan's AI Development Toolkit: the road to 1.0 and past it
+# MikeVan's AI Development Toolkit - Polyglot: the road to 1.0 and past it
 
 Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
 
-Draft 3, 2026-09-12 (draft 2 earlier the same day ordered the languages by the user base; draft 3 records the 1.0 slot as done and Witness as the second library). Publisher: `prs` (Project Revive Solutions, LLC). Companion to toolkit-architecture.md and toolkit-api.md. This document says what each version number of every extension in the toolkit means, so a person reading a Marketplace page knows what they are getting and a person reading the code knows what to build next.
+Draft 4, 2026-09-18 (draft 2 earlier the same day ordered the languages by the user base; draft 3 records the 1.0 slot as done and Witness as the second library; draft 4 names the series). Publisher: `prs` (Project Revive Solutions, LLC). Companion to toolkit-architecture.md and toolkit-api.md. This document says what each version number of every extension in the toolkit means, so a person reading a Marketplace page knows what they are getting and a person reading the code knows what to build next.
+
+## What the series are called
+
+The 1.x series is Polyglot. The name and the numbering say the same thing: the
+only thing that moves the minor number is a new language, six of them, one
+abstraction layer, the same look and feel in every one. So a person reading a
+Marketplace page sees the series in the product name, and a person reading
+1.2 knows how far along that pathway the build is. The products carry the name
+(`MikeVan's AI Development Toolkit - Polyglot`, `DeepTest - Polyglot`,
+`UntangleIt - Polyglot`); the two shared libraries do not, because
+`@projectrevivesolutions/complexity` and `@projectrevivesolutions/witness` are
+package identifiers that other code imports by name.
+
+The 2.x series is Intellectus. What it holds is not settled in this document.
 
 ## 1.0: the core, done
 

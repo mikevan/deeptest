@@ -1,4 +1,4 @@
-# DeepTest
+# DeepTest - Polyglot
 
 "Coverage tells you a line ran. DeepTest tells you whether it was tested."
 

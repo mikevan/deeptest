@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.10
+
+The 1.x series is named Polyglot, and DeepTest carries it. The side panel header
+and the Marketplace title read `DeepTest - Polyglot`, with the version still
+appended to the header as before. The name is stamped by the build, because VS
+Code will not let a panel header change at run time. Nothing else changes.
+
 ## 1.0.9
 
 Witness moves out of DeepTest into its own library, `@projectrevivesolutions/witness`, and DeepTest bundles it the way it bundles the complexity library. Nothing measured changes: Mocha and Playwright component tests report the same lines, decisions, and functions per test as 1.0.8. The Witness hooks now read `WITNESS_*` environment names, which DeepTest sets beside its own.
