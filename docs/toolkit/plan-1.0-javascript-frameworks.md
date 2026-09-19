@@ -194,6 +194,84 @@ document, not a commit, and the document is not frozen until he rules on it.
 Nothing here sketches the mechanism, because a sketch written in a plan hardens
 into a decision nobody made.
 
+## Phase 8: CommentIt, deliberately thin (1.0.17)
+
+CommentIt is the fourth tool and the "explain" verb: doc comments for every
+file, class, and method of untangled code, plus a README, in the style the
+project already uses. The version it ships here is on purpose a small one, and
+the reason belongs in writing rather than in anyone's head.
+
+CommentIt was placed in the 2.0 series because the thing it is meant to do
+needs a semantic model: comments written in terms of what code is for, not what
+it mechanically does. None of that exists in 1.x. So the 1.x CommentIt is built
+from structure alone. It can say what a method takes, what it returns, what it
+calls, and which decisions it makes, because the library and Witness already
+prove all of that. It cannot say why the method exists, and it does not
+pretend to.
+
+That refusal is the feature. Where it cannot answer "why", it says so in the
+comment, in plain words, rather than guessing from names or inventing intent
+from a signature. Every one of those gaps is a real question about a real
+method in the reader's own codebase, which is a far better argument for the
+next series than any document we could write. A strawman that bluffs would
+discredit the case. One that is honest about its boundary makes it.
+
+Three rules follow from that, and they are the whole design brief.
+
+It never infers intent. A name, a comment already in the file, a commit
+message, and a test name are evidence about intent, and none of them is
+intent; if CommentIt uses them it says which one it used. It never writes a
+sentence it cannot ground in something the tools proved. And a gap is written
+as a gap, in the same voice as the rest of the comment, never as a `TODO` or an
+apology.
+
+The full CommentIt, the one that reads the ladder from application intent down
+to the method and turns a scene on every rung, is 2.x work and is not designed
+here.
+
+Verify: on a HelloWorlds port, every file, class, and method carries a comment
+that a person reading the code agrees with, and every "why" the tool could not
+establish is marked as such rather than filled in.
+
+## What this slot owes, recorded 2026-09-19
+
+Work accepted on thinner evidence than the standard, listed so it can be
+collected before the series ends rather than remembered. The owner's ruling was
+to finish the slot first. Nothing here is a reason to stop; every line is a
+reason not to forget.
+
+**Already public.** Playwright component tests use the Witness Vite plugin,
+which compared a `path.resolve` result against a Vite module id and therefore
+matched nothing on Windows from 1.0.7 until the normalisation in 1.0.11. The
+structure numbers a person checks after a release look correct either way, so
+this would not have been caught by the usual verification. Whether per-test
+attribution on that runner was ever real on Windows is unknown and unmeasured.
+
+**Angular, changed in 1.0.12 without the evidence the Vitest change had.**
+There is no end-to-end test for either Angular driver, because DeepTest would
+need the Angular toolchain in its devDependencies to run one, and that was
+deferred. `angularRunnerConfig` has a test, but it proves only that the string
+we generate is the string we meant; it cannot detect that the builder rejects a
+plugin in a runner config, that the setup file loads in the wrong order, or
+that the universe is wrong. The setup-file ordering risk is written as a code
+comment rather than asserted. The universe change on that path was never
+measured against a fixture, while the identical change on the Vitest path was.
+
+**Tests that cannot fail where the bug lives.** The separator regression test
+in Witness builds its ids with `path.sep`, so on Linux it is identical to the
+assertion above it and can only fail on Windows. A test written for a bug that
+shipped twice should fail on every platform, which means constructing the
+mismatch explicitly rather than deriving it from the host.
+
+**Dead code kept alive by its own tests.** `coverageIstanbulSpec` has no
+production caller after 1.0.12. It goes out with the Istanbul packages in
+1.0.15.
+
+**Not done rather than done badly.** The dogfood pass covered complexity only;
+Witness, UntangleIt, and DeepTest have never been measured by the toolkit's own
+tools. The UAT walk was last done on 2026-09-12 and is stale by every delivery
+since.
+
 ## What is uncertain, said now rather than found later
 
 - Playwright component tests: per-test counters in a browser page are unverified. 1.0 may ship with Playwright detected and explained rather than driven. Answered in 1.0.7: Witness instruments the component build through a Vite plugin and reads the page per test through a fixture the project imports (Playwright's only in-worker seam); the engine counters over the DevTools protocol were verified too and are the path for whole-run coverage without cooperation.

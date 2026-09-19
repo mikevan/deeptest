@@ -19,6 +19,10 @@ export interface Voice {
 
 export const PRODUCT = 'DeepTest';
 
+/** The full product name, series included. Used where the product is named in full,
+ *  never in running text like "DeepTest: checking", which reads worse with it. */
+export const PRODUCT_FULL = `${PRODUCT} - Polyglot`;
+
 function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }

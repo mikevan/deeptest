@@ -11,7 +11,7 @@ import { DecidedLine } from '../decisions/decisions';
 import { LineResult } from '../engine/types';
 import { describeReach } from '../report/plain';
 import { ResultState } from '../state';
-import { PRODUCT, Voice, badge, decisionSentence, findingSentence, functionDecisionSentence, summaryRows, testsSentence, verdict } from './words';
+import { PRODUCT, PRODUCT_FULL, Voice, badge, decisionSentence, findingSentence, functionDecisionSentence, summaryRows, testsSentence, verdict } from './words';
 
 export interface SidebarMessage {
   type: 'run' | 'configure' | 'report' | 'output' | 'open' | 'fix' | 'accept' | 'undo' | 'decide' | 'fixFunction' | 'undoFunction' | 'toggleNumbers' | 'toggleOverlay';
@@ -110,7 +110,7 @@ export class SidebarView implements vscode.WebviewViewProvider, vscode.Disposabl
 </head>
 <body>
 ${this.body(voice)}
-<p class="numbers" style="margin-top:24px">${PRODUCT} ${esc(this.version)}</p>
+<p class="numbers" style="margin-top:24px">${PRODUCT_FULL} ${esc(this.version)}</p>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
   document.addEventListener('click', (e) => {

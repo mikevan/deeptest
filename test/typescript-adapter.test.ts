@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, coverageIstanbulSpec, angularCliBin, parseKarmaSummary, unloadedCoverages } from '../src/languages/typescript/coverage';
+import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, coverageIstanbulSpec, angularCliBin, parseKarmaSummary, unloadedCoverages, angularRunnerConfig } from '../src/languages/typescript/coverage';
 import { typescriptPlugin } from '../src/languages/typescript';
 import { detectAngularBuilder, detectAngularKarmaConfig, detectAngularRunner, detectAngularRunnerConfig, detectFramework, frameworkSentence } from '../src/languages/typescript/framework';
 import { createRequire } from 'node:module';
@@ -388,4 +388,37 @@ test('a single-file component is parsed through its script block on its real lin
   } finally {
     structureSource.dispose();
   }
+});
+
+/**
+ * The Angular drivers have no end-to-end test: running one would mean carrying
+ * the whole Angular toolchain in DeepTest's devDependencies. This pins what the
+ * builder is handed instead, so a refactor cannot quietly drop the Witness
+ * plugin or put the coverage provider back, which is how this path would go
+ * falsely clean without anything failing.
+ */
+test('the Angular runner config carries Witness and no coverage provider', () => {
+  const withProject = angularRunnerConfig({
+    userConfigImport: './../vitest.config.ts',
+    pluginImport: './hooks/witness-vite.mjs',
+    hooksDir: 'C:\\p\\.deeptest\\hooks',
+    wasmDir: 'C:\\ext\\dist',
+    sourceRoot: 'C:\\p\\src',
+  });
+  assert.match(withProject, /import \{ witnessPlugin \} from "\.\/hooks\/witness-vite\.mjs";/);
+  assert.match(withProject, /import base from "\.\/\.\.\/vitest\.config\.ts";/, "the project's own runner config is still wrapped");
+  assert.match(withProject, /plugins: \[witnessPlugin\(\{/);
+  assert.match(withProject, /sourceRoot: "C:\\\\p\\\\src"/, 'paths survive JSON escaping on Windows');
+  assert.doesNotMatch(withProject, /provider/, 'no coverage provider: Witness measures, not the builder');
+  assert.doesNotMatch(withProject, /reportsDirectory/, 'and no reports directory');
+  assert.doesNotMatch(withProject, /coverage/, 'the whole coverage block is gone');
+
+  const noProject = angularRunnerConfig({
+    pluginImport: './hooks/witness-vite.mjs',
+    hooksDir: 'h',
+    wasmDir: 'w',
+    sourceRoot: 's',
+  });
+  assert.match(noProject, /const base = \{\};/, 'a project with no runner config still gets a valid wrapper');
+  assert.doesNotMatch(noProject, /import base/);
 });

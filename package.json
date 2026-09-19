@@ -1,9 +1,17 @@
 {
   "name": "deeptest",
   "displayName": "DeepTest - Polyglot",
+  "keywords": [
+    "testing",
+    "code coverage",
+    "unit tests",
+    "AI",
+    "vibe coding",
+    "MikeVan's AI Development Toolkit"
+  ],
   "description": "Checks an AI's work. Runs your tests, then shows, in plain words, which lines of code no test ever reached and how many tests each line needs. You decide what to do about it.",
   "icon": "media/deeptestLogo.png",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "publisher": "prs",
   "license": "GPL-3.0-only",
   "repository": {
@@ -28,7 +36,7 @@
       "activitybar": [
         {
           "id": "deeptest",
-          "title": "DeepTest - Polyglot 1.0.11",
+          "title": "DeepTest - Polyglot 1.0.12",
           "icon": "media/deeptest.svg"
         }
       ]
@@ -38,9 +46,9 @@
         {
           "type": "webview",
           "id": "deeptest.sidebar",
-          "name": "DeepTest - Polyglot 1.0.11",
+          "name": "DeepTest - Polyglot 1.0.12",
           "icon": "media/deeptest.svg",
-          "contextualTitle": "DeepTest - Polyglot 1.0.11"
+          "contextualTitle": "DeepTest - Polyglot 1.0.12"
         }
       ]
     },
