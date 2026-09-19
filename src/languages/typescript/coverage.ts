@@ -1,23 +1,29 @@
 /**
  * TypeScript / JavaScript CoverageSource over Jest or Vitest.
  *
- * Per-test attribution: both runners instrument with Istanbul and keep live
- * counters in a global inside the worker. A small hook (hooks/jest.cjs,
- * hooks/vitest.mjs) snapshots those counters around every test and writes
- * which statement lines each test executed. One ordinary test run, no
- * per-test process launches, nothing for the user to install beyond the
- * runner they already use (Vitest also needs @vitest/coverage-istanbul,
- * offered as a one-click install).
+ * Per-test attribution, and the two runners no longer get it the same way.
+ * Jest still instruments with Istanbul and keeps live counters in a global
+ * inside the worker, and hooks/jest.cjs snapshots those counters around every
+ * test. Vitest is measured by Witness: the Vite plugin instruments every source
+ * as Vite transforms it, and hooks/witness-vitest.mjs marks the test boundary,
+ * so nothing but Vitest itself has to be installed in the project.
  *
  * How the hook gets loaded without clobbering the project's own config:
  *   Jest   - `jest --showConfig` reveals the existing setupFilesAfterEnv;
  *            the run passes that list plus the hook.
  *   Vitest - a generated .deeptest/vitest.config.mjs imports the project's
- *            config and mergeConfig()s the hook and coverage settings in.
+ *            config, merges the Witness plugin in, and replaces setupFiles
+ *            with the Witness hook ahead of the project's own. Replaces, not
+ *            merges: a project's setup file usually sits under the source root,
+ *            so it is instrumented, and it must not run before the runtime
+ *            exists.
  *
- * The executable-line universe comes from the runner's own
- * coverage-final.json (json reporter), which includes files no test
- * loaded, so an untested module shows up red instead of vanishing.
+ * The executable-line universe. Jest takes it from the runner's own
+ * coverage-final.json, which includes files no test loaded. Vitest cannot:
+ * Vite only transforms what something imports, so a source file no test
+ * reaches is invisible to the plugin. witnessUniverse() measures those files
+ * with the same instrumenter afterwards, which is what keeps an untested
+ * module red instead of vanishing from the report.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -318,7 +324,6 @@ export class TypeScriptCoverageSource implements CoverageSource {
   }
 
   async checkEnvironment(ctx: Pick<RunContext, 'workspaceRoot' | 'settings' | 'log'>): Promise<EnvironmentCheck> {
-    const problems: string[] = [];
     let nodeVersion = '';
     try {
       const probe = await runProcess('node', ['--version'], { cwd: ctx.workspaceRoot });
@@ -352,7 +357,7 @@ export class TypeScriptCoverageSource implements CoverageSource {
         ok: false,
         summary: `Node ${nodeVersion}, no test runner`,
         problems: ['Neither Jest nor Vitest is in this project. Install one, or pick one on the setup screen.'],
-        fix: { title: 'Install Vitest', command: 'npm', args: ['install', '--save-dev', 'vitest', '@vitest/coverage-istanbul'] },
+        fix: { title: 'Install Vitest', command: 'npm', args: ['install', '--save-dev', 'vitest'] },
       };
     }
     const moduleDir = resolveModuleDir(ctx.workspaceRoot, runner);
@@ -370,19 +375,11 @@ export class TypeScriptCoverageSource implements CoverageSource {
     } catch {
       // version is decoration
     }
-    if (runner === 'vitest' && !resolveModuleDir(ctx.workspaceRoot, '@vitest/coverage-istanbul')) {
-      // The coverage package must match Vitest's major: an unpinned install
-      // fetched 5.0.0 into a Vitest 4 project and every test file failed
-      // with "coverageFilesDirectory is required" (1.0 survey, 2026-09-12).
-      const spec = coverageIstanbulSpec(runnerVersion);
-      problems.push(`Vitest needs ${spec} for per-test attribution.`);
-      return {
-        ok: false,
-        summary: `Node ${nodeVersion}, vitest ${runnerVersion}`,
-        problems,
-        fix: { title: `Install ${spec}`, command: 'npm', args: ['install', '--save-dev', spec] },
-      };
-    }
+    // Vitest needs nothing installed beyond itself. Witness instruments through
+    // the Vite plugin the generated wrapper adds, so the project's own coverage
+    // provider is not used and the pinned @vitest/coverage-istanbul install this
+    // check used to demand is gone. Angular's builder still runs on istanbul, so
+    // checkAngularEnvironment keeps its requirement until that runner moves.
     return { ok: true, summary: `Node ${nodeVersion}, ${runner} ${runnerVersion}`, problems: [] };
   }
 
@@ -641,6 +638,11 @@ export class TypeScriptCoverageSource implements CoverageSource {
 
     let output = '';
     let exitCode: number | null = null;
+    // Files the run never loaded. Vite only transforms what something imports,
+    // so a source file no test reaches is invisible to the plugin and would
+    // vanish from the report rather than show as untested. Filled in below for
+    // Vitest, the same way the Mocha and Playwright branches do it.
+    let extra: FileCoverage[] = [];
     const moduleDir = resolveModuleDir(ctx.workspaceRoot, runner);
     if (!moduleDir) {
       throw new Error(`${runner} is not installed. Run npm install.`);
@@ -694,7 +696,9 @@ export class TypeScriptCoverageSource implements CoverageSource {
     } else {
       const bin = path.join(moduleDir, 'vitest.mjs');
       const userConfig = findVitestConfig(ctx.workspaceRoot);
-      const hook = path.join(hookDir, 'vitest.mjs');
+      const hook = path.join(hookDir, 'witness-vitest.mjs');
+      const sourceRoot = path.join(ctx.workspaceRoot, ctx.settings.sourceRoot || '');
+      const wasmDir = this.options.wasmDir ?? runtimeEnvironment().wasmDir;
       // A relative import: Vite bundles the wrapper and everything it
       // imports relatively, so a TypeScript config goes through esbuild
       // like it would on its own. A file:// URL would be left to Node
@@ -703,25 +707,27 @@ export class TypeScriptCoverageSource implements CoverageSource {
         const rel = path.relative(workDir, p).split(path.sep).join('/');
         return rel.startsWith('.') ? rel : `./${rel}`;
       };
-      const include = `${sourceGlobRoot === '.' ? '' : `${sourceGlobRoot}/`}**/*.${SOURCE_GLOB_EXTENSIONS}`;
       const wrapper = [
         '// Generated by DeepTest on every run. Wraps the project config; do not edit.',
         "import { defineConfig, mergeConfig } from 'vitest/config';",
+        `import { witnessPlugin } from ${JSON.stringify(relativeImport(path.join(hookDir, 'witness-vite.mjs')))};`,
         userConfig ? `import base from ${JSON.stringify(relativeImport(path.join(ctx.workspaceRoot, userConfig)))};` : 'const base = {};',
         "const resolved = typeof base === 'function' ? await base({ command: 'serve', mode: 'test' }) : base;",
-        'export default mergeConfig(resolved, defineConfig({',
-        '  test: {',
-        `    setupFiles: [${JSON.stringify(hook)}],`,
-        '    coverage: {',
-        '      enabled: true,',
-        "      provider: 'istanbul',",
-        "      reporter: ['json'],",
-        `      reportsDirectory: ${JSON.stringify(coverageDir)},`,
-        `      include: [${JSON.stringify(include)}],`,
-        `      exclude: ['**/node_modules/**', '**/*.test.*', '**/*.spec.*', '**/__tests__/**', '**/*.d.ts', '**/.deeptest/**'${testsPath ? `, ${JSON.stringify(`${testsPath}/**`)}` : ''}],`,
-        '    },',
-        '  },',
+        'const merged = mergeConfig(resolved, defineConfig({',
+        '  plugins: [witnessPlugin({',
+        `    hooksDir: ${JSON.stringify(hookDir)},`,
+        `    wasmDir: ${JSON.stringify(wasmDir)},`,
+        `    sourceRoot: ${JSON.stringify(sourceRoot)},`,
+        '  })],',
         '}));',
+        '// setupFiles is replaced, not merged. mergeConfig concatenates arrays, so a',
+        "// merge leaves the project's own setup file first, and a project's setup file",
+        '// usually lives under the source root, which means it is instrumented and',
+        '// calls the runtime in its prologue. Loaded second, the Witness hook is too',
+        '// late and every test file dies on "reading \'file\' of undefined".',
+        'const theirs = merged.test?.setupFiles ?? [];',
+        `merged.test = { ...merged.test, setupFiles: [${JSON.stringify(hook)}, ...(Array.isArray(theirs) ? theirs : [theirs])] };`,
+        'export default merged;',
         '',
       ].join('\n');
       fs.mkdirSync(workDir, { recursive: true });
@@ -730,14 +736,25 @@ export class TypeScriptCoverageSource implements CoverageSource {
       // A positional filter is a substring match on test file paths. --dir
       // would re-root the project's include patterns, which breaks them.
       const args = [bin, 'run', '--config', wrapperPath, ...(testsPath ? [`${testsPath}/`] : []), ...splitArgs(extraArgs)];
+      const witnessEnv = {
+        ...env,
+        [WITNESS_ENV.wasmDir]: wasmDir,
+        [WITNESS_ENV.sourceRoot]: sourceRoot,
+        [WITNESS_ENV.coverageDir]: coverageDir,
+      };
       ctx.log(`$ node ${args.join(' ')}`);
-      const run = await runProcess('node', args, { cwd: ctx.workspaceRoot, env, log: ctx.log, signal: ctx.signal });
+      const run = await runProcess('node', args, { cwd: ctx.workspaceRoot, env: witnessEnv, log: ctx.log, signal: ctx.signal });
       output = run.output;
       exitCode = run.exitCode;
+      const relSourceRoot = ctx.settings.sourceRoot || '';
+      const walked = walkSources(sourceRoot)
+        .map((rel) => (relSourceRoot ? `${relSourceRoot}/${rel}` : rel))
+        .filter((rel) => !isTestFile(rel) && !(testsPath && rel.startsWith(`${testsPath}/`)));
+      extra = await witnessUniverse(ctx.workspaceRoot, walked, wasmDir, ctx.log);
     }
 
     const tests = runner === 'jest' ? parseJestSummary(output, exitCode) : parseVitestSummary(output, exitCode);
-    return this.collect(ctx, runner, coverageDir, attrDir, tests, exitCode);
+    return this.collect(ctx, runner, coverageDir, attrDir, tests, exitCode, extra);
   }
 
   private prepareWorkDir(ctx: RunContext): { workDir: string; attrDir: string; coverageDir: string; hookDir: string; env: NodeJS.ProcessEnv } {

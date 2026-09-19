@@ -41,9 +41,11 @@ export class SidebarView implements vscode.WebviewViewProvider, vscode.Disposabl
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
-    // The build number sits in the panel's own title bar, so a screenshot of
-    // the headline alone says which build it came from.
-    view.title = `${PRODUCT} ${this.version}`;
+    // The panel header is the view container's title, set in package.json at
+    // build time, and it already reads "DeepTest - Polyglot <version>".
+    // Setting the view's own title here as well made VS Code render the two
+    // joined by a colon, so the name and the build number each appeared twice.
+    // One name, in one place.
     view.webview.options = { enableScripts: true, localResourceRoots: [this.extensionUri] };
     view.webview.onDidReceiveMessage((msg: SidebarMessage) => this.onMessage(msg));
     view.onDidDispose(() => {

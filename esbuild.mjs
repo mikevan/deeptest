@@ -19,11 +19,16 @@ const treeSitterCjs = {
 
 const watch = process.argv.includes('--watch');
 
-// Stamp the build number into the titles VS Code shows for the side panel.
-// When a container holds one view, VS Code puts the container's title in the
-// panel header and hides the view's own title, and neither can change at
-// run time. So the version goes into package.json at build time; every build
-// bumps the version first, so the header always names the build it came from.
+// Stamp the product name and build number into the titles VS Code shows for
+// the side panel. The container's title is what a person reads in the panel
+// header, and it can only come from package.json, so it is written here.
+//
+// Corrected 2026-09-19: the older note here claimed the view's own title is
+// hidden and that neither title can change at run time. Neither is true. The
+// extension used to set view.title in resolveWebviewView, and VS Code rendered
+// the container's title and that one joined by a colon, so the header read
+// "DeepTest - Polyglot 1.0.10: DeepTest 1.0.10". The run-time assignment is
+// gone; this is now the only place either title is set.
 {
   const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
   const stamped = `DeepTest - Polyglot ${pkg.version}`;
