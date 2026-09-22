@@ -476,6 +476,20 @@ export class PythonCoverageSource implements CoverageSource {
         }
       }
     }
-    return { coverages, tests, measuredFiles: coverages.map((c) => c.path), evidence: { testsFinished: tests.passed + tests.failed, testsRecorded: recorded.size, brokenBoundaries: 0, reconcilable: false } };
+    return {
+      coverages,
+      tests,
+      measuredFiles: coverages.map((c) => c.path),
+      evidence: {
+        testsFinished: tests.passed + tests.failed,
+        testsRecorded: recorded.size,
+        // A context exists only where a test touched a measured line, so every
+        // context that exists is evidence by construction.
+        recordsWithEvidence: recorded.size,
+        filesWithHits: coverages.filter((c) => c.executed.size > 0).length,
+        brokenBoundaries: 0,
+        reconcilable: false,
+      },
+    };
   }
 }

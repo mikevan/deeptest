@@ -77,7 +77,13 @@ async function main() {
   // finished test left a record, and no record was cut off.
   const e = run.evidence || {};
   const hole = words.evidenceProblemSentence(e);
-  console.log(`evidence     ${e.testsFinished} finished, ${e.testsRecorded} recorded, ${e.brokenBoundaries} cut off${e.reconcilable ? '' : ' (not reconcilable for this runner)'}${hole ? '   <- THE PANEL WOULD REFUSE: ' + hole : ''}`);
+  // All five counts, because three of them hid the defect this tool exists to
+  // find: Angular under Vitest reported 11 finished and 11 recorded while every
+  // record was empty and nothing was measured at all. Records existing is not
+  // the same fact as records meaning anything.
+  console.log(
+    `evidence     ${e.testsFinished} finished, ${e.testsRecorded} recorded, ${e.recordsWithEvidence} carrying a file, ${e.filesWithHits} files with a line that ran, ${e.brokenBoundaries} cut off${e.reconcilable ? '' : ' (not reconcilable for this runner)'}${hole ? '   <- THE PANEL WOULD REFUSE: ' + hole : ''}`,
+  );
 
   const ids = new Set();
   for (const c of run.coverages) {

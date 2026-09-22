@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, coverageIstanbulSpec, angularCliBin, parseKarmaSummary, unloadedCoverages, angularRunnerConfig, reconcile, parseAttribution, readUnmeasured } from '../src/languages/typescript/coverage';
 import { typescriptPlugin } from '../src/languages/typescript';
 import { detectAngularBuilder, detectAngularKarmaConfig, detectAngularRunner, detectAngularRunnerConfig, detectFramework, frameworkSentence } from '../src/languages/typescript/framework';
+import type { FileCoverage } from '../src/engine/types';
 import { createRequire } from 'node:module';
 import { guessLanguage } from '../src/detect/language';
 import { analyze } from '../src/engine/density';
@@ -111,8 +112,9 @@ async function endToEnd(fixture: string, expectedTestIds: string[], line25: 'dec
   const run = await source.run({ workspaceRoot: fixture, settings: settings('test', 'src'), log: (l) => log.push(l) });
   assert.equal(run.tests.passed, 3, log.join('\n'));
   assert.equal(run.tests.failed, 0);
-  // Every test that finished left its record, and none was cut off (1.0.14).
-  assert.deepEqual(run.evidence, { testsFinished: 3, testsRecorded: 3, brokenBoundaries: 0, reconcilable: true }, log.join('\n'));
+  // Every test that finished left its record, every record carried a file, the
+  // code under test actually ran, and none was cut off (1.0.14, 1.0.15).
+  assert.deepEqual(run.evidence, { testsFinished: 3, testsRecorded: 3, recordsWithEvidence: 3, filesWithHits: 1, brokenBoundaries: 0, reconcilable: true }, log.join('\n'));
   const calcPath = run.measuredFiles.find((f) => /src\/calc\.[jt]s$/.test(f));
   assert.ok(calcPath, `calc not measured: ${run.measuredFiles.join(', ')}`);
   const calc = run.coverages.find((c) => c.path === calcPath)!;
@@ -177,8 +179,13 @@ test('end to end with Vitest from a project outside the repository: the hook is 
 test('reconcile: the runner\'s count against the hooks\' records, and a broken boundary counted', () => {
   const t = { passed: 3, failed: 1, errors: 0, skipped: 2, exitCode: 1 };
   const rec = (test: string, boundary?: 'overlapped' | 'unterminated') => ({ test, files: {}, ...(boundary ? { boundary } : {}) });
-  assert.deepEqual(reconcile(t, [rec('a'), rec('b'), rec('c'), rec('d')]), { testsFinished: 4, testsRecorded: 4, brokenBoundaries: 0, reconcilable: true });
-  assert.deepEqual(reconcile(t, [rec('a'), rec('b')]), { testsFinished: 4, testsRecorded: 2, brokenBoundaries: 0, reconcilable: true }, 'skipped tests are not expected to leave a record; finished ones are');
+  const hit = (p: string): FileCoverage => ({ path: p, lines: new Map([[1, new Set(['a'])]]), executed: new Set([1]) });
+  const cold = (p: string): FileCoverage => ({ path: p, lines: new Map([[1, new Set<string>()]]), executed: new Set<number>() });
+  assert.deepEqual(reconcile(t, [rec('a'), rec('b'), rec('c'), rec('d')]), { testsFinished: 4, testsRecorded: 4, recordsWithEvidence: 0, filesWithHits: 0, brokenBoundaries: 0, reconcilable: true });
+  assert.deepEqual(reconcile(t, [rec('a'), rec('b')]), { testsFinished: 4, testsRecorded: 2, recordsWithEvidence: 0, filesWithHits: 0, brokenBoundaries: 0, reconcilable: true }, 'skipped tests are not expected to leave a record; finished ones are');
+  // What the counts mean when the records carry something and the files ran.
+  const full = { test: 'a', files: { 'src/x.ts': [1, 2] } };
+  assert.deepEqual(reconcile(t, [full, rec('b')], [hit('src/x.ts'), cold('src/y.ts')]), { testsFinished: 4, testsRecorded: 2, recordsWithEvidence: 1, filesWithHits: 1, brokenBoundaries: 0, reconcilable: true });
   assert.deepEqual(reconcile(t, [rec('a', 'overlapped'), rec('b'), rec('c'), rec('d', 'unterminated')]).brokenBoundaries, 2);
   assert.deepEqual(parseAttribution(['', '{"test":"a","files":{}}', 'not json', '{"files":{}}', '{"test":"b","files":{},"boundary":"overlapped"}']).map((r) => `${r.test}:${r.boundary ?? 'clean'}`), ['a:clean', 'b:overlapped'], 'blank, torn, and testless lines are dropped');
 });
@@ -436,28 +443,23 @@ test('a single-file component is parsed through its script block on its real lin
  * plugin or put the coverage provider back, which is how this path would go
  * falsely clean without anything failing.
  */
-test('the Angular runner config carries Witness and no coverage provider', () => {
-  const withProject = angularRunnerConfig({
-    userConfigImport: './../vitest.config.ts',
-    pluginImport: './hooks/witness-vite.mjs',
-    hooksDir: 'C:\\p\\.deeptest\\hooks',
-    wasmDir: 'C:\\ext\\dist',
-    sourceRoot: 'C:\\p\\src',
-  });
-  assert.match(withProject, /import \{ witnessPlugin \} from "\.\/hooks\/witness-vite\.mjs";/);
+test('the Angular runner config pins the istanbul provider and the reports directory', () => {
+  // The version of this test that stood from 1.0.12 to 1.0.14 asserted that
+  // the generated config carried the Witness plugin and no coverage provider,
+  // and it passed on every run while that path measured nothing whatsoever.
+  // It pinned the string we meant to generate, which was exactly the string we
+  // generated; what it could not see is that the builder bundles before Vitest
+  // runs, so the plugin was handed built chunks and declined all of them. A
+  // generated-string test cannot prove a path measures anything. The guard
+  // against a silent false-clean is the run refusing when it measured nothing
+  // (evidenceProblemSentence), not this test.
+  const withProject = angularRunnerConfig({ userConfigImport: './../vitest.config.ts', coverageDir: 'C:\\p\\.deeptest\\coverage' });
   assert.match(withProject, /import base from "\.\/\.\.\/vitest\.config\.ts";/, "the project's own runner config is still wrapped");
-  assert.match(withProject, /plugins: \[witnessPlugin\(\{/);
-  assert.match(withProject, /sourceRoot: "C:\\\\p\\\\src"/, 'paths survive JSON escaping on Windows');
-  assert.doesNotMatch(withProject, /provider/, 'no coverage provider: Witness measures, not the builder');
-  assert.doesNotMatch(withProject, /reportsDirectory/, 'and no reports directory');
-  assert.doesNotMatch(withProject, /coverage/, 'the whole coverage block is gone');
+  assert.match(withProject, /provider: 'istanbul'/, 'the builder picks v8 otherwise, and v8 keeps no live counters to snapshot per test');
+  assert.match(withProject, /reportsDirectory: "C:\\\\p\\\\\.deeptest\\\\coverage"/, 'the report lands where the driver reads it, and the path survives JSON escaping on Windows');
+  assert.doesNotMatch(withProject, /witnessPlugin/, 'Witness does not instrument this path; the builder does, and the hook maps its chunks back');
 
-  const noProject = angularRunnerConfig({
-    pluginImport: './hooks/witness-vite.mjs',
-    hooksDir: 'h',
-    wasmDir: 'w',
-    sourceRoot: 's',
-  });
+  const noProject = angularRunnerConfig({ coverageDir: 'c' });
   assert.match(noProject, /const base = \{\};/, 'a project with no runner config still gets a valid wrapper');
   assert.doesNotMatch(noProject, /import base/);
 });

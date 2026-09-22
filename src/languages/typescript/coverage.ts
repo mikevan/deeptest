@@ -36,6 +36,7 @@ import { createInstrumenter, hooksDir as witnessHooksDir, HOOK_FILES as WITNESS_
 export { nodeSupportsWitness };
 import { pathToFileURL } from 'node:url';
 import { runtimeEnvironment } from '../shared/runtime';
+import { engineMismatch, engineMismatchSentence } from './engines';
 
 /**
  * jest and vitest are driven through their own binaries. ng-vitest is
@@ -307,6 +308,27 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * The packages DeepTest actually starts for a runner, in the order a person
+ * would meet them. Angular's CLI is first because it is the process that
+ * refuses; the builder and the runner under it follow. Anything not
+ * installed is skipped by the gate, so listing a package that a given
+ * project does not have costs nothing.
+ */
+export function enginePackages(runner: Runner, workspaceRoot: string): string[] {
+  if (runner === 'ng-vitest') {
+    return ['@angular/cli', '@angular/build', 'vitest'];
+  }
+  if (runner === 'ng-karma') {
+    return ['@angular/cli', '@angular/build', 'karma'];
+  }
+  if (runner === 'playwright-ct') {
+    const ct = detectPlaywrightCt(workspaceRoot);
+    return ct ? [ct.package, '@playwright/test'] : ['@playwright/test'];
+  }
+  return [runner];
+}
+
 export interface TsCoverageOptions {
   /** Absolute folder holding the hook files (jest.cjs, vitest.mjs, the Witness runtime and loader, and so on). */
   hooksDir: string;
@@ -343,6 +365,16 @@ export class TypeScriptCoverageSource implements CoverageSource {
       .filter((relPath) => isTestFile(relPath));
   }
 
+  /**
+   * The environment check, and then the question it used to skip: does the
+   * tool we are about to drive run on this Node at all? Everything below
+   * answers "is it installed and configured"; the gate at the end reads what
+   * each tool publishes in `engines.node` and refuses when the running Node
+   * is outside it. Before 1.0.15 the screen said ok and the Angular CLI then
+   * refused to start, which is the check answering a question it had not
+   * asked. The gate runs only on an otherwise good environment, because a
+   * missing package is the more useful thing to say first.
+   */
   async checkEnvironment(ctx: Pick<RunContext, 'workspaceRoot' | 'settings' | 'log'>): Promise<EnvironmentCheck> {
     let nodeVersion = '';
     try {
@@ -351,6 +383,48 @@ export class TypeScriptCoverageSource implements CoverageSource {
     } catch (err) {
       return { ok: false, summary: 'Node.js not found', problems: [`${(err as Error).message} Install Node.js and make sure "node" is on PATH.`] };
     }
+    const result = await this.checkInstalled(ctx, nodeVersion);
+    if (!result.ok) {
+      return result;
+    }
+    return this.engineGate(ctx.workspaceRoot, nodeVersion, this.runnerFor(ctx.workspaceRoot, ctx.settings), result);
+  }
+
+  /**
+   * Reads what each tool this runner drives declares in `engines.node` and
+   * turns the first unsatisfiable one into a refusal. A tool that declares
+   * nothing, is not installed, or declares a range the reader cannot parse
+   * is passed over: see engines.ts for why an unreadable range lets the run
+   * proceed rather than stopping it.
+   */
+  private engineGate(workspaceRoot: string, nodeVersion: string, runner: Runner | undefined, ok: EnvironmentCheck): EnvironmentCheck {
+    if (!runner) {
+      return ok;
+    }
+    const packages = enginePackages(runner, workspaceRoot).map((name) => {
+      const dir = resolveModuleDir(workspaceRoot, name);
+      let packageJsonText: string | undefined;
+      if (dir) {
+        try {
+          packageJsonText = fs.readFileSync(path.join(dir, 'package.json'), 'utf8');
+        } catch {
+          packageJsonText = undefined;
+        }
+      }
+      return { name, packageJsonText };
+    });
+    const mismatch = engineMismatch(nodeVersion, packages);
+    if (!mismatch) {
+      return ok;
+    }
+    return {
+      ok: false,
+      summary: `Node ${nodeVersion}, ${mismatch.tool} needs ${mismatch.requires}`,
+      problems: [engineMismatchSentence(mismatch)],
+    };
+  }
+
+  private async checkInstalled(ctx: Pick<RunContext, 'workspaceRoot' | 'settings' | 'log'>, nodeVersion: string): Promise<EnvironmentCheck> {
     const framework = detectFramework(ctx.workspaceRoot);
     if (framework?.name === 'Angular' && framework.angularBuilder === 'legacy-karma' && tsFields(ctx.settings).runner === 'auto') {
       // The older devkit builder takes different flags (--karma-config,
@@ -466,10 +540,21 @@ export class TypeScriptCoverageSource implements CoverageSource {
     } catch {
       // version is decoration
     }
-    // Nothing else is needed. Witness instruments through the plugin the
-    // generated runner config adds, so the builder's own coverage provider,
-    // and the pinned @vitest/coverage-istanbul this check used to demand, are
-    // no longer part of the run. Karma above still requires its own packages.
+    // The builder bundles before Vitest runs, so this path measures through
+    // the builder's own istanbul instrumentation of its chunks and maps the
+    // counters back to sources (1.0.4, restored in 1.0.15). That needs the
+    // provider in the project, pinned to the project's Vitest major, because
+    // the provider and Vitest move together. 1.0.12 to 1.0.14 dropped this
+    // requirement along with the path that needed it.
+    if (!resolveModuleDir(workspaceRoot, '@vitest/coverage-istanbul')) {
+      const spec = coverageIstanbulSpec(vitestVersion);
+      return {
+        ok: false,
+        summary: `Node ${nodeVersion}, ng test with vitest ${vitestVersion}, ${spec} missing`,
+        problems: [`This Angular project runs its tests through "ng test" with Vitest, and DeepTest measures that run with the istanbul coverage provider, which is not installed under node_modules. Install ${spec} and check again.`],
+        fix: { title: `Install ${spec}`, command: 'npm', args: ['install', '--save-dev', spec] },
+      };
+    }
     return { ok: true, summary: `Node ${nodeVersion}, ng test with vitest ${vitestVersion}`, problems: [] };
   }
 
@@ -842,8 +927,10 @@ export class TypeScriptCoverageSource implements CoverageSource {
       }
     }
     coverages.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    const evidence = reconcile(tests, parseAttribution(attribution));
-    ctx.log(`Evidence: ${evidence.testsFinished} tests finished, ${evidence.testsRecorded} attribution records, ${evidence.brokenBoundaries} with a broken test boundary.`);
+    const evidence = reconcile(tests, parseAttribution(attribution), coverages);
+    ctx.log(
+      `Evidence: ${evidence.testsFinished} tests finished, ${evidence.testsRecorded} attribution records, ${evidence.recordsWithEvidence} of them carrying a file, ${evidence.filesWithHits} files with a line that ran, ${evidence.brokenBoundaries} with a broken test boundary.`,
+    );
     return { coverages, tests, measuredFiles: coverages.map((c) => c.path), evidence };
   }
 
@@ -860,6 +947,20 @@ export class TypeScriptCoverageSource implements CoverageSource {
    * only, and ten of eleven tests come back unattributed (1.0.4 notes).
    * The builder instruments its own chunks, so the hook maps each counter
    * back to the source file through the chunk's source map (hooks/attribution.cjs).
+   *
+   * This is 1.0.4's path, restored in 1.0.15. From 1.0.12 to 1.0.14 this
+   * method instrumented through the Witness Vite plugin instead, and it
+   * measured nothing at all: the builder bundles the application before
+   * Vitest is involved, so the only files Vitest transforms are the built
+   * chunks in the output folder, which sit outside the source root and the
+   * plugin correctly declines. Measured on the angular-vitest port at
+   * 1.0.14: eleven tests passed, every coverage report was `{}`, every
+   * attribution record was `{"files":{}}`, and the card would have called
+   * a fully tested project 81 untested lines. The change went in without an
+   * end-to-end test, which the plan had already recorded as a debt. Moving
+   * this path onto Witness is real work with no seam here yet; it belongs
+   * to the runner migration, not to a delivery whose job is an honest
+   * baseline to migrate against.
    */
   private async runAngular(ctx: RunContext): Promise<CoverageRun> {
     const cli = angularCliBin(ctx.workspaceRoot);
@@ -877,16 +978,10 @@ export class TypeScriptCoverageSource implements CoverageSource {
     const userConfig = detectAngularRunnerConfig(ctx.workspaceRoot);
     const sourceRoot = path.join(ctx.workspaceRoot, ctx.settings.sourceRoot || '');
     const wasmDir = this.options.wasmDir ?? runtimeEnvironment().wasmDir;
-    // Witness instruments through the plugin, at transform time, on the source.
-    // That is what retires 1.0.4's source-map work on this path: the builder
-    // bundles after the transform, so the counters are keyed by source file
-    // from the start and nothing has to be mapped back from a chunk.
+    const relSourceRoot = ctx.settings.sourceRoot || '';
     const wrapper = angularRunnerConfig({
       userConfigImport: userConfig ? relativeImport(path.join(ctx.workspaceRoot, userConfig)) : undefined,
-      pluginImport: relativeImport(path.join(hookDir, 'witness-vite.mjs')),
-      hooksDir: hookDir,
-      wasmDir,
-      sourceRoot,
+      coverageDir,
     });
     const wrapperPath = path.join(workDir, 'vitest.config.mjs');
     fs.writeFileSync(wrapperPath, wrapper, 'utf8');
@@ -895,8 +990,16 @@ export class TypeScriptCoverageSource implements CoverageSource {
       'test',
       '--watch=false',
       '--isolate',
-      // One flag per value: the CLI's array options swallow every following
-      // word otherwise, and the run dies with "Unknown arguments".
+      '--coverage',
+      // One flag per value throughout: the CLI's array options swallow every
+      // following word otherwise, and the run dies with "Unknown arguments".
+      '--coverage-reporters',
+      'json',
+      // Without this the report holds only what a test loaded, and a file no
+      // test imports drops out of the report instead of showing as untested.
+      '--coverage-include',
+      posix(relSourceRoot ? `${relSourceRoot}/**/*.${SOURCE_GLOB_EXTENSIONS}` : `**/*.${SOURCE_GLOB_EXTENSIONS}`),
+      ...['**/*.spec.*', '**/*.test.*', '**/.deeptest/**'].flatMap((g) => ['--coverage-exclude', g]),
       ...(testsPath ? [`${testsPath}/**/*.spec.*`, `${testsPath}/**/*.test.*`].flatMap((g) => ['--include', g]) : []),
       // The hook goes in through the CLI rather than the wrapper's setupFiles,
       // because that is the seam the builder documents and 1.0.4 proved. It
@@ -905,21 +1008,23 @@ export class TypeScriptCoverageSource implements CoverageSource {
       // with its own setup file under the source root fails on "reading 'file'
       // of undefined", that order is why.
       '--setup-files',
-      posix(path.relative(ctx.workspaceRoot, path.join(hookDir, 'witness-vitest.mjs'))),
+      posix(path.relative(ctx.workspaceRoot, path.join(hookDir, 'vitest.mjs'))),
       '--runner-config',
       posix(path.relative(ctx.workspaceRoot, wrapperPath)),
       ...splitArgs(extraArgs),
     ];
-    const witnessEnv = {
-      ...env,
-      [WITNESS_ENV.wasmDir]: wasmDir,
-      [WITNESS_ENV.sourceRoot]: sourceRoot,
-      [WITNESS_ENV.coverageDir]: coverageDir,
-    };
     ctx.log(`$ node ${args.join(' ')}`);
-    const run = await runProcess('node', args, { cwd: ctx.workspaceRoot, env: witnessEnv, log: ctx.log, signal: ctx.signal });
+    const run = await runProcess('node', args, { cwd: ctx.workspaceRoot, env, log: ctx.log, signal: ctx.signal });
     const tests = parseVitestSummary(run.output, run.exitCode);
-    const relSourceRoot = ctx.settings.sourceRoot || '';
+    // `--coverage-include` is meant to put every source file in the report, so
+    // this walk should add nothing. It stays as a backstop, because a file
+    // missing from the report reads as a file with nothing to say, and it logs
+    // what it had to add: on this path that is a finding about the include
+    // pattern, not routine. The lines it supplies come from Witness and the
+    // rest from the builder's instrumentation of its own compiled output, so
+    // the two disagree on a component; that is the universe question the
+    // runner migration settles, and mixing them is still better than a file
+    // silently vanishing.
     const walked = walkSources(sourceRoot)
       .map((rel) => (relSourceRoot ? `${relSourceRoot}/${rel}` : rel))
       .filter((rel) => !isTestFile(rel) && !(testsPath && rel.startsWith(`${testsPath}/`)));
@@ -1053,19 +1158,21 @@ export function parseKarmaSummary(output: string, exitCode: number | null): Test
  * source, before the builder bundles. That ordering is what retired the
  * chunk-to-source mapping 1.0.4 needed.
  */
-export function angularRunnerConfig(options: { userConfigImport?: string; pluginImport: string; hooksDir: string; wasmDir: string; sourceRoot: string }): string {
+export function angularRunnerConfig(options: { userConfigImport?: string; coverageDir: string }): string {
   return [
     '// Generated by DeepTest on every run. Wraps the runner config Angular would load; do not edit.',
     "import { defineConfig, mergeConfig } from 'vitest/config';",
-    `import { witnessPlugin } from ${JSON.stringify(options.pluginImport)};`,
     options.userConfigImport ? `import base from ${JSON.stringify(options.userConfigImport)};` : 'const base = {};',
     "const resolved = typeof base === 'function' ? await base({ command: 'serve', mode: 'test' }) : base;",
     'export default mergeConfig(resolved, defineConfig({',
-    '  plugins: [witnessPlugin({',
-    `    hooksDir: ${JSON.stringify(options.hooksDir)},`,
-    `    wasmDir: ${JSON.stringify(options.wasmDir)},`,
-    `    sourceRoot: ${JSON.stringify(options.sourceRoot)},`,
-    '  })],',
+    '  test: {',
+    '    coverage: {',
+    // The builder picks v8 whenever v8 is installed beside istanbul or alone,
+    // and v8 keeps no live counters for the hook to snapshot around a test.
+    "      provider: 'istanbul',",
+    `      reportsDirectory: ${JSON.stringify(options.coverageDir)},`,
+    '    },',
+    '  },',
     '}));',
     '',
   ].join('\n');
@@ -1191,10 +1298,12 @@ export function readUnmeasured(coverageDir: string): Array<{ path: string; reaso
  * them alone. The runner decides what to do with the numbers; this only
  * counts them.
  */
-export function reconcile(tests: TestRunSummary, records: AttributionRecord[]): Evidence {
+export function reconcile(tests: TestRunSummary, records: AttributionRecord[], coverages: FileCoverage[] = []): Evidence {
   return {
     testsFinished: tests.passed + tests.failed,
     testsRecorded: records.length,
+    recordsWithEvidence: records.filter((r) => Object.keys(r.files ?? {}).length > 0).length,
+    filesWithHits: coverages.filter((c) => c.executed.size > 0).length,
     brokenBoundaries: records.filter((r) => r.boundary !== undefined).length,
     reconcilable: true,
   };

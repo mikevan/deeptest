@@ -1408,6 +1408,22 @@ Three holes, closed in this order because the third is the worst.
    on a scratch copy of the Vitest fixture with `describe.concurrent`: the
    headless survey prints the refusal where 1.0.13 printed a card.
 
+Measured on the device, 2026-09-22, and the reason the three parts had to
+ship together. The `react-vitest` port at 1.0.14 reports 11 tests finished,
+11 records, 0 cut off, and `src/schedule.ts` at 49 lines with nothing
+covered, which is the same figure 1.0.13 recorded, so the evidence machinery
+moved no measured number. A copy of that port with one `describe.concurrent`
+and two awaited timers reports 11 finished and 11 records as well. The count
+reconciles. It reconciles on a run where two tests were cut off and only 9
+distinct test ids appear across the 11 records, which means two tests' lines
+were credited to a name that did not run them and two ids were written
+twice. Part 1 alone would have passed that run and drawn a card. The
+boundary marker from part 3 is what refused it. The ordering in this
+delivery was a judgement before that run and is a measured fact after it: a
+count check proves that records exist, not that they mean anything, so the
+thing that makes a record trustworthy has to ship in the same delivery as
+the thing that counts them.
+
 Rejected: teaching the runtime to keep a stack of open tests so concurrent
 tests could each get their own lines. The counters are per file, not per
 test, so a line hit while two tests are open belongs to both or to neither,
@@ -1419,3 +1435,131 @@ a test touched a measured line, so a test that touched none leaves nothing
 and the counts are not comparable. `Evidence.reconcilable` is false there and
 the runner does not pretend otherwise. Per-test proof on Python is the same
 job Witness did for JavaScript and is not in this slot.
+
+## The tool has to run before we drive it (1.0.15)
+
+Task 5 of the 2026-09-22 handoff. `checkAngularEnvironment` reported "ok" and
+the Angular CLI then refused to start. The check had one job, to say whether
+this project can be checked, and it answered without reading the requirement
+the tool publishes for exactly that purpose: Angular CLI 22.1.8 declares
+`engines.node` of `^22.22.3 || ^24.15.0 || >=26.0.0`, and the machine ran
+22.22.0.
+
+Reading a range means understanding one, which means a semver matcher.
+`semver` the package was not taken: principle 7 says nothing extra to install,
+DeepTest bundles what it imports, and the subset of the grammar that
+`engines.node` fields actually use is small enough to implement and pin with
+tests. What is supported is written at the top of engines.ts. Anything outside
+it returns undefined rather than false, and the caller lets the run proceed,
+because refusing a project over a range we misread is the same class of wrong
+answer as driving a tool that cannot start, pointed the other way.
+
+The gate runs once, in `checkEnvironment`, after the installed-and-configured
+checks and only on an otherwise good environment, because a missing package is
+the more useful thing to say first. `enginePackages` names what each runner
+actually starts and puts the process that would refuse first: for Angular the
+CLI, then the builder, then the runner under it.
+
+## Angular with Vitest measured nothing for three versions (1.0.15)
+
+The 1.0.15 Angular baseline run found the path broken, which is what a
+baseline is for. Eleven tests passed on the angular-vitest port, every
+coverage report in `.deeptest/coverage` was `{}` at two bytes, and all eleven
+attribution records read `{"test":"...","files":{},"outcomes":{},"entered":{}}`.
+The seven files in the report came entirely from the `witnessUniverse` walk
+afterwards. A person would have been told that a fully tested project had 81
+lines no test has ever reached.
+
+The cause is in the log, not in a theory. The run prints `Using Vitest
+configuration file: ...\.deeptest\vitest.config.mjs`, so the generated config
+with the Witness plugin is read. Then it prints `Building...`, the chunk list
+(`chunk-CGZBV6BD.js`, `spec-app-greet.js`, `chunk-G3X6D2YX.js`), `Application
+bundle generation complete`, and only then `RUN v4.1.11`. The builder bundles
+the application before Vitest is involved, so every id the plugin's `transform`
+receives is a built chunk in the output folder, outside the source root, and
+the plugin declines all of them correctly. There is no seam here for a Vite
+plugin to reach the project's sources. `chunk-G3X6D2YX.js` is the same chunk
+name quoted in attribution.cjs's comment from 1.0.4, which is the delivery that
+solved this by mapping chunks back through their source maps.
+
+1.0.12 replaced that with the plugin and deleted the workaround it called
+unnecessary. The plan had already recorded the debt: no end-to-end test for
+either Angular driver, and `angularRunnerConfig` tested only that the string we
+generate is the string we meant. That test passed on every run for three
+versions while the path measured nothing, which is the lesson worth keeping: a
+generated-string test cannot prove a path measures anything.
+
+So 1.0.15 restores 1.0.4, rebuilt from the account in these notes rather than
+from memory, and the restoration is exact rather than approximate: 21
+attributed lines over a universe of 82, which is 25.61%, against the 1.0.4
+note's "attribution on 21 lines" and "coverage 25.61%". Moving this path onto
+Witness is real work with no seam yet and belongs to the runner migration. A
+delivery whose job is an honest baseline cannot build the thing the baseline
+exists to be compared against.
+
+### The three universes, measured
+
+The same seven files, instrumented three ways, on ports whose sources are
+byte for byte identical where they share a name:
+
+| file | source | Karma | restored Vitest |
+|---|---|---|---|
+| `names.ts` | 18 | 18 | 13 |
+| `greeting.ts` | 2 | 5 | 4 |
+| `schedule.service.ts` | 49 | 49 | 51 |
+| `app.ts` | 0 | 0 | 2 |
+
+Source is measured, not asserted: Witness and istanbul-lib-instrument were both
+run over the ports' actual files and return the identical statement lines,
+`7,8,9,11,12,14,17,22,23,24,26,27,29,34,35,36,37,39` for names.ts and two lines
+for greeting.ts. Karma's figures come from the builder instrumenting its own
+compiled output, which expands a component's decorator into code, so it reads 5
+where the source has 2. The restored Vitest path disagrees with the source on
+four of seven files in both directions, and `names.ts` is plain TypeScript with
+no component in it: it loses five executable lines, which shrinks the
+denominator and flatters the coverage figure.
+
+None of that is new. The figures match 1.0.4's to the second decimal, so this
+is what the bundled path has always done and nobody had measured it against the
+source to find out. Two consequences for the runner migration. Neither Angular
+baseline is the thing to reproduce; the acceptance target is source-level
+Witness semantics on every file, for both runners, not only for components.
+And the reason to move Angular onto Witness is no longer only "one instrument":
+it is that the instrument currently in use does not agree with the code a
+person is reading.
+
+## Records that exist and mean nothing (1.0.15)
+
+1.0.14 refused a run whose attribution had a hole in it, and passed the Angular
+run above: eleven tests finished, eleven records written, nothing measured.
+`reconcile` counted records. It never asked whether a record contained
+anything, so presence stood in for meaning, one level deeper than the
+9-ids-across-11-records finding in the same delivery.
+
+The rule now is about the run, not the record. `Evidence` carries
+`recordsWithEvidence`, records holding at least one file, and `filesWithHits`,
+measured files with at least one line that executed. A run is refused when
+tests finished and both are zero. It is checked before the reconcilable guard,
+so Python is covered by it too.
+
+One empty record is deliberately not refused. A test that asserts on a constant,
+or exercises only a test helper, legitimately touches no measured source, and
+refusing that would start rejecting healthy runs. The refused shape is the one
+no healthy run can take: tests finished and not one line of the project was
+recorded as running, under a test or at import time.
+
+Proving it needed a project that produces the shape, since a working Angular run
+no longer can. `react-vitest\_to_delete\scratch-empty` is two passing tests
+that touch nothing under `src`, beside a source file nobody imports. It reports
+2 finished, 2 recorded, 0 carrying a file, 0 files with a line that ran, and the
+refusal fires. It needs no install and no junction: Node walks up to
+`react-vitest\node_modules`, and `_to_delete/` is in the HelloWorlds
+`.gitignore`.
+
+`scripts/survey.cjs` printed three of the five evidence counts, so the first
+1.0.15 acceptance run could not show the new check at all and the acceptance
+tool was reporting a subset of what the product computes. It prints all five
+now. The product was never wrong; `out/src/ui/words.js` and `dist/extension.js`
+both carried the check. That is twice in one day that a tool meant to catch
+something reported only what it already knew how to say, which is the same
+shape as the generated-string test above.

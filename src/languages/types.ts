@@ -98,6 +98,19 @@ export interface Evidence {
    */
   brokenBoundaries: number;
   /**
+   * Records carrying at least one file. A record with `files: {}` is a test
+   * that reached nothing the instrumenter was watching, which is ordinary on
+   * its own (a test of a constant, or of a test helper) and damning when it
+   * is every record in the run.
+   */
+  recordsWithEvidence: number;
+  /**
+   * Measured files with at least one line that executed, under a test or at
+   * import time. Zero across a run that finished tests means the run
+   * measured nothing at all, whatever the record count says.
+   */
+  filesWithHits: number;
+  /**
    * Whether the two counts can be held against each other. coverage.py's
    * contexts appear only where a test touched a measured line, so a test
    * that touched none leaves no record and the counts are not comparable.

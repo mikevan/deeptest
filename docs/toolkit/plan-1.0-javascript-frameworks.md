@@ -150,12 +150,18 @@ and functions per test as it does today, to the line.
   Vitest branch calls it the same way. Shipping this step without that call
   would make every Vitest project falsely clean, which is the worst failure
   this product has.
-- **1.0.12, Angular under Vitest.** It rides the same plugin through the
-  builder's configuration. It also pays a debt: the builder bundles, which is why
-  1.0.4 had to map bundle chunks back to sources through `inputSourceMap` and
-  `originalPosition`. Witness instruments the source at transform time, before
-  bundling, so the counters are keyed by source path from the start and that
-  workaround is deleted rather than carried.
+- **1.0.12, Angular under Vitest. Wrong, and reverted in 1.0.15.** The step
+  said the path rides the same plugin through the builder's configuration, and
+  that Witness instruments the source at transform time so 1.0.4's chunk
+  source-map workaround could be deleted rather than carried. Measured on the
+  port on 2026-09-22: the builder bundles the application before Vitest is
+  involved, so the plugin is only ever handed built chunks outside the source
+  root and declines all of them. The path measured nothing at all from 1.0.12
+  to 1.0.14, with eleven tests passing and every attribution record empty.
+  1.0.15 restores the 1.0.4 path exactly, and moving Angular onto Witness
+  stays in this phase as unfinished work with no seam identified yet. The
+  step shipped on the strength of a test that asserted the generated config
+  was the config we meant; see the engineering notes.
 - **1.0.13, Jest.** Jest does not use Vite and does not honour Node's loader
   hooks, because `jest-runtime` owns its own module registry. So it needs a Jest
   transformer, and a transformer cannot simply be added: Jest runs one

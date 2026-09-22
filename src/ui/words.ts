@@ -291,6 +291,17 @@ export function nothingToScoreSentence(tests: TestRunSummary): string {
  */
 export function evidenceProblemSentence(evidence: Evidence): string | undefined {
   const see = 'Press "Show the log" to see the test run.';
+  // Nothing at all was measured. This is checked before anything else and on
+  // every runner, reconcilable or not, because it is the one shape no healthy
+  // run can take: tests finished, and not one line of the project was recorded
+  // as running, under a test or at startup. A card drawn from it reports a
+  // fully tested project as entirely untested, which is what Angular under
+  // Vitest did from 1.0.12 to 1.0.14 while the record count reconciled
+  // perfectly. An empty record on its own is ordinary and is not refused here;
+  // every record empty and no file touched is not.
+  if (evidence.testsFinished > 0 && evidence.recordsWithEvidence === 0 && evidence.filesWithHits === 0) {
+    return `${plural(evidence.testsFinished, 'test')} ran, but not one line of your code was recorded as running, so there is nothing to score. The tests and the code are not being measured together. ${see}`;
+  }
   if (!evidence.reconcilable) {
     return undefined;
   }

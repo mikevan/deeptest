@@ -2,7 +2,7 @@
 
 Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
 
-Updated 2026-09-22 (1.0.14, in the tree). Companion to vscode-density-extension-spec.md.
+Updated 2026-09-22 (1.0.15, in the tree). Companion to vscode-density-extension-spec.md.
 Source tree and VSIX live at C:\workspace\MikeVan's AI Development Toolkit\DeepTest on Michael's machine. The
 authoritative copy of this file is docs/build-status.md in that tree.
 Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
@@ -16,6 +16,44 @@ and every extension is tagged 1.0.0 together (DeepTest, UntangleIt, the
 pack, and the library). From here the minor number moves once per language
 across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
 numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
+
+## 2026-09-22, 1.0.15: the tool has to run before we drive it, and Angular measures again
+
+- `src/languages/typescript/engines.ts` (new) reads what each package DeepTest
+  starts declares in `engines.node` and `checkEnvironment` refuses before the
+  run when the running Node is outside it, naming the package, its range, and
+  the installed version. A range the reader cannot parse lets the run proceed.
+  `enginePackages` lists what each runner actually starts, the process that
+  would refuse first.
+- Angular with Vitest is back on the 1.0.4 path: the istanbul provider and the
+  reports directory pinned in the generated runner config, `--coverage
+  --coverage-reporters json --coverage-include`, `hooks/vitest.mjs` as the
+  setup file, and the builder's chunks mapped back to sources through
+  `hooks/attribution.cjs`. The environment check requires
+  `@vitest/coverage-istanbul` again, pinned to the project's Vitest major.
+  From 1.0.12 to 1.0.14 this path measured nothing: the builder bundles before
+  Vitest runs, so the Witness plugin only ever saw built chunks outside the
+  source root.
+- A run that measured nothing at all is refused: no record carrying a file and
+  no file with a line that ran. `Evidence` gained `recordsWithEvidence` and
+  `filesWithHits`; one empty record is still ordinary and is not refused.
+- `scripts/survey.cjs` prints all five evidence counts. It printed three, which
+  is why the first 1.0.15 acceptance run could not show the new check at all.
+- Tests: 217 in DeepTest (nine new in `test/engines.test.ts`, one new in
+  `words.test.ts`, `reconcile` and the Angular runner config tests rewritten).
+  Witness, UntangleIt, and complexity untouched.
+- Verified on Michael's machine at Node v22.23.2, 2026-09-22. `npm test`: 217
+  passed, 0 skipped. `survey.cjs` on HelloWorlds\angular-vitest: environment
+  ok with `ng test with vitest 4.1.11`; 11 finished, 11 recorded, 11 carrying a
+  file, 3 files with a line that ran, 0 cut off; `greet.ts` 9/9/9,
+  `greeting.ts` 4/4/4, `names.ts` 13/8/8, 21 attributed lines over a universe
+  of 82, which is 25.61% and is what the 1.0.4 note recorded. On
+  HelloWorlds\react-vitest\_to_delete\scratch-empty, a project whose two
+  passing tests touch nothing under `src`: 2 finished, 2 recorded, 0 carrying a
+  file, 0 files with a line that ran, and the refusal fires with no card drawn.
+- Verify: those two survey runs. The second is the one that proves the refusal,
+  because a working Angular run can no longer produce the shape that triggers
+  it.
 
 ## 2026-09-22, 1.0.14: a card is never drawn from evidence with a hole in it
 

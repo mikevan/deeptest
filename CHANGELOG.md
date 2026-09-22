@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.0.15
+
+DeepTest checks that a tool will run before it drives it, and Angular with
+Vitest measures source again.
+
+Every npm package may declare which Node versions it supports, and nothing
+read that. The setup screen said the environment was ok and the Angular CLI
+then refused to start, because the CLI needs Node `^22.22.3 || ^24.15.0 ||
+>=26.0.0` and the machine had 22.22.0. DeepTest now reads what each tool it
+starts declares and refuses first, naming the package, what it needs, and
+what is installed. A range it cannot parse lets the run proceed, because
+refusing a project over a misread range is the same wrong answer pointed the
+other way.
+
+Angular with Vitest measured nothing at all from 1.0.12 until now, and said
+so with a straight face. That delivery moved the path onto the Witness Vite
+plugin, but the Angular builder bundles the application before Vitest is
+involved, so the only files the plugin ever saw were built chunks outside the
+source root, and it correctly declined every one. Eleven tests passed, every
+coverage report was `{}`, every attribution record was empty, and the card
+called a fully tested project 81 untested lines. The path is back to what
+1.0.4 built, which measures through the builder's own instrumentation and
+maps the chunks back to sources, and it reproduces 1.0.4's recorded figures
+exactly: 21 attributed lines, 25.61% coverage on the Angular port.
+
+That defect passed 1.0.14's evidence check, so the check was incomplete. It
+counted records and never asked whether a record contained anything. A run is
+now refused when it measured nothing at all, meaning no record carried a file
+and no file had a line that ran. One empty record is ordinary and is still
+allowed; a suite where every record is empty is not a verdict, it is a
+measurement failure.
+
 ## 1.0.14
 
 A card is never drawn from evidence with a hole in it.

@@ -181,7 +181,7 @@ test('nothingToScoreSentence says why the run was refused, in plain words', () =
 });
 
 test('evidenceProblemSentence: a hole in the attribution is named; a whole record is silence', () => {
-  const ok = { testsFinished: 3, testsRecorded: 3, brokenBoundaries: 0, reconcilable: true };
+  const ok = { testsFinished: 3, testsRecorded: 3, recordsWithEvidence: 3, filesWithHits: 2, brokenBoundaries: 0, reconcilable: true };
   assert.equal(evidenceProblemSentence(ok), undefined);
   assert.equal(evidenceProblemSentence({ ...ok, testsRecorded: 5 }), undefined, 'a retried test leaves two records; that is not a hole');
   assert.equal(
@@ -201,7 +201,7 @@ test('evidenceProblemSentence: a hole in the attribution is named; a whole recor
     '2 tests were cut off before they ended, so what they reached cannot be told apart from the next test. Nothing was scored. Press "Show the log" to see the test run.',
     'a broken boundary is the worse finding and is named first',
   );
-  assert.equal(evidenceProblemSentence({ ...ok, testsRecorded: 0, reconcilable: false }), undefined, 'coverage.py contexts cannot be counted against tests, and the sentence does not pretend they can');
+  assert.equal(evidenceProblemSentence({ ...ok, testsRecorded: 0, recordsWithEvidence: 0, reconcilable: false }), undefined, 'coverage.py contexts cannot be counted against tests, and the sentence does not pretend they can');
 });
 
 test('an unmeasured file is not ready, is named on the card, and is out of every number', () => {
@@ -230,4 +230,36 @@ test('skipped decisions are counted and said, per file', () => {
   assert.equal(skippedSentence([{ line: 9, reason: 'why' }]), '1 decision on line 9 could not be counted, so which way it went is unknown. The line is still counted as run or not run.');
   assert.equal(skippedSentence([]), '');
   assert.equal(f.lines.length, 2, 'a skipped decision does not remove its line');
+});
+
+test('a run that measured nothing is refused before anything else is said about it', () => {
+  // Angular under Vitest, 1.0.12 to 1.0.14: eleven tests finished, eleven
+  // records were written, every one of them empty, every coverage report
+  // "{}". The counts reconciled and the card called a fully tested project
+  // entirely untested. Presence of records is not evidence of measurement.
+  const measuredNothing = { testsFinished: 11, testsRecorded: 11, recordsWithEvidence: 0, filesWithHits: 0, brokenBoundaries: 0, reconcilable: true };
+  assert.equal(
+    evidenceProblemSentence(measuredNothing),
+    '11 tests ran, but not one line of your code was recorded as running, so there is nothing to score. The tests and the code are not being measured together. Press "Show the log" to see the test run.',
+  );
+  assert.equal(
+    evidenceProblemSentence({ ...measuredNothing, reconcilable: false }),
+    evidenceProblemSentence(measuredNothing),
+    'the check does not depend on the counts being comparable, so Python is covered by it too',
+  );
+  assert.match(
+    evidenceProblemSentence({ ...measuredNothing, brokenBoundaries: 3 }) ?? '',
+    /^11 tests ran, but not one line/,
+    'and it is said first, because a boundary that broke is beside the point when nothing was measured at all',
+  );
+
+  // The cases it must not refuse. An empty record on its own is ordinary.
+  const ok = { testsFinished: 11, testsRecorded: 11, recordsWithEvidence: 9, filesWithHits: 4, brokenBoundaries: 0, reconcilable: true };
+  assert.equal(evidenceProblemSentence(ok), undefined, 'two tests that touched no measured line are not a hole');
+  assert.equal(
+    evidenceProblemSentence({ ...ok, recordsWithEvidence: 0, filesWithHits: 4 }),
+    undefined,
+    'no per-test record but code did run is the attribution-free shape, not a measurement failure',
+  );
+  assert.equal(evidenceProblemSentence({ testsFinished: 0, testsRecorded: 0, recordsWithEvidence: 0, filesWithHits: 0, brokenBoundaries: 0, reconcilable: true }), undefined, 'a run with no finished test is refused earlier, by nothingToScoreSentence');
 });
