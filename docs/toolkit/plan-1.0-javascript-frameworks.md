@@ -162,13 +162,19 @@ and functions per test as it does today, to the line.
   stays in this phase as unfinished work with no seam identified yet. The
   step shipped on the strength of a test that asserted the generated config
   was the config we meant; see the engineering notes.
-- **1.0.13, Jest.** Jest does not use Vite and does not honour Node's loader
-  hooks, because `jest-runtime` owns its own module registry. So it needs a Jest
-  transformer, and a transformer cannot simply be added: Jest runs one
-  transformer per file pattern and the project already has one. Ours has to wrap
-  whatever theirs is, call it first, and instrument its output. Composing with a
-  transformer we do not control is the risk in this step, and the `react-jest`
-  fixture answers it before any shape is promised.
+- **1.0.13, Jest. Delivered in 1.0.16, with one change of mechanism.** Jest
+  does not use Vite and does not honour Node's loader hooks, because
+  `jest-runtime` owns its own module registry, so it needs a transformer, and a
+  transformer cannot simply be added: Jest runs one per file pattern and the
+  project already has one. Ours wraps whatever theirs is. What this step got
+  wrong is the order, because it said instrument the output. Jest's `process`
+  is synchronous and the instrumenter is not, and instrumenting Babel's output
+  would put the counters in compiled coordinates and need a source map to get
+  home. So the source is instrumented before Jest starts, in the walk that
+  already produces the universe, and the transformer substitutes it and calls
+  the project's own. The `react-jest` port answered the composing risk exactly
+  as this step said it should: eleven tests, per-test attribution, and figures
+  identical to the react-vitest port file for file.
 - **1.0.14, Karma.** The same bundling problem as Angular under Vitest, without
   the clean answer, because a Karma preprocessor sees what the builder already
   served. Getting Witness in ahead of the bundle rather than preprocessing after

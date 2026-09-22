@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.0.16
+
+Jest measures through Witness, so nothing in a Jest project installs a
+coverage package either.
+
+Jest's transform contract is synchronous and the instrumenter is not, because
+tree-sitter initialises its WASM asynchronously. So the instrumenting happens
+before Jest starts: the walk that already produced the executable-line
+universe now produces the instrumented source in the same parse, and the
+transformer is a synchronous lookup that substitutes it and hands it to the
+project's own transformer. The project's transform table is read from
+`jest --showConfig` and wrapped pattern by pattern, so a project that
+transforms other file types keeps doing exactly that, with its own options.
+
+The instrumenting goes in front of the project's transformer rather than
+behind it. Witness rewrites source textually on the source's own lines, so
+letting Babel compile around the counters keeps the numbers in the
+coordinates the editor uses. Instrumenting Babel's output would have put them
+in compiled coordinates and needed a source map to get back, which is the
+problem the Angular path spent 1.0.15 escaping.
+
+Measured on the react-jest port: eleven tests, eleven records, per-test
+attribution on the component, the helpers, and nothing on the untested
+villain. Those numbers are identical, file for file, to what the same program
+reports under Vitest, which is the first time two runners with different
+transform pipelines have been shown to agree.
+
 ## 1.0.15
 
 DeepTest checks that a tool will run before it drives it, and Angular with

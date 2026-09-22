@@ -2,7 +2,7 @@
 
 Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
 
-Updated 2026-09-22 (1.0.15, in the tree). Companion to vscode-density-extension-spec.md.
+Updated 2026-09-22 (1.0.16, in the tree). Companion to vscode-density-extension-spec.md.
 Source tree and VSIX live at C:\workspace\MikeVan's AI Development Toolkit\DeepTest on Michael's machine. The
 authoritative copy of this file is docs/build-status.md in that tree.
 Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
@@ -16,6 +16,43 @@ and every extension is tagged 1.0.0 together (DeepTest, UntangleIt, the
 pack, and the library). From here the minor number moves once per language
 across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
 numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
+
+## 2026-09-22, 1.0.16: Jest measures through Witness
+
+- The Jest branch of `run()` asks for no coverage from Jest at all. It reads
+  the project's resolved transform table from `jest --showConfig`, wraps every
+  entry with `hooks/witness-jest-transform.cjs` (`witnessTransform`), loads the
+  runtime through `--setupFiles` and the boundary through
+  `--setupFilesAfterEnv`, ours first in both, and lets the project's own
+  entries follow.
+- `witnessUniverse` takes an optional `{ sourceRoot, instrumentedDir }` and
+  then produces both halves from one parse: the executable-line universe, and
+  the instrumented source written under `.deeptest/instrumented` mirroring each
+  file's path. Maps are embedded, because Jest gives every test file its own
+  global and a registration made in one sandbox is invisible in the next.
+  `prepareWorkDir` clears that folder, so a deleted source cannot leave an
+  instrumented copy behind for the transformer to serve.
+- The test-path filter goes ahead of every flag. Jest's yargs arrays swallow
+  each following word, and a positional after them is read as one more setup
+  file: the first run died with `Module ^/...test/ in the setupFilesAfterEnv
+  option was not found`.
+- `hooks/jest.cjs` now has no caller. It goes out with `attribution.cjs` when
+  Angular moves onto Witness, not before.
+- Tests: 218 in DeepTest (one new, `witnessTransform`), 10 in Witness (one new,
+  the transformer end to end against a stub upstream). complexity and
+  UntangleIt untouched.
+- Verified on Michael's machine at Node v22.23.2, 2026-09-22. Witness 10
+  passed, DeepTest 218 passed and 0 skipped. `survey.cjs` on
+  HelloWorlds\react-jest, after `npm install` there: 11 finished, 11 recorded,
+  11 carrying a file, 3 files with a line that ran, 0 cut off, no refusal;
+  `src/components/Greeting.jsx` 1/1, `src/greet.js` 9/9, `src/names.js` 18
+  lines with 8 covered, `src/schedule.js` 49 lines at zero. Every one of those
+  figures matches what the same program reports on the react-vitest port,
+  file for file.
+- Verify: that survey run. The port is the awkward one on purpose, with JSX
+  through `@babel/preset-react`, a jsdom environment, and a project
+  `setupFilesAfterEnv` of its own that the hook goes in front of rather than
+  replaces.
 
 ## 2026-09-22, 1.0.15: the tool has to run before we drive it, and Angular measures again
 

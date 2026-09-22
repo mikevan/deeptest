@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, coverageIstanbulSpec, angularCliBin, parseKarmaSummary, unloadedCoverages, angularRunnerConfig, reconcile, parseAttribution, readUnmeasured } from '../src/languages/typescript/coverage';
+import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, coverageIstanbulSpec, angularCliBin, parseKarmaSummary, unloadedCoverages, angularRunnerConfig, reconcile, parseAttribution, readUnmeasured, witnessTransform } from '../src/languages/typescript/coverage';
 import { typescriptPlugin } from '../src/languages/typescript';
 import { detectAngularBuilder, detectAngularKarmaConfig, detectAngularRunner, detectAngularRunnerConfig, detectFramework, frameworkSentence } from '../src/languages/typescript/framework';
 import type { FileCoverage } from '../src/engine/types';
@@ -174,6 +174,28 @@ test('end to end with Vitest from a project outside the repository: the hook is 
   const hookDir = path.join(tmp, '.deeptest', 'hooks');
   assert.ok(log.some((l) => l === `Hook copied into ${hookDir}.`), `no copy line in the log:\n${log.join('\n')}`);
   assert.ok(log.some((l) => l.includes('--config') && l.includes(path.join(tmp, '.deeptest', 'vitest.config.mjs'))), 'the wrapper config lives in the project');
+});
+
+test('witnessTransform wraps every entry the project has and keeps its patterns', () => {
+  const ours = 'C:\\p\\.deeptest\\hooks\\witness-jest-transform.cjs';
+  // What `jest --showConfig` resolves to, including the default babel-jest a
+  // project that configures nothing still gets.
+  const table = witnessTransform(
+    [
+      ['\\.[jt]sx?$', '/n/babel-jest/build/index.js', {}],
+      ['\\.svg$', '/n/svg-transformer.js', { icon: true }],
+    ],
+    ours,
+  );
+  assert.deepEqual(Object.keys(table ?? {}), ['\\.[jt]sx?$', '\\.svg$'], "the project's own patterns, untouched and in order");
+  assert.deepEqual(table?.['\\.[jt]sx?$'], [ours, { upstream: ['/n/babel-jest/build/index.js', {}] }]);
+  assert.deepEqual(table?.['\\.svg$'], [ours, { upstream: ['/n/svg-transformer.js', { icon: true }] }], "a project that transforms other file types keeps doing so, with its options");
+
+  // Nothing to wrap means nothing would be measured, and the driver refuses
+  // rather than running blind.
+  assert.equal(witnessTransform(undefined, ours), undefined);
+  assert.equal(witnessTransform([], ours), undefined);
+  assert.equal(witnessTransform([['\\.js$', undefined as unknown as string, {}]], ours), undefined, 'an entry Jest did not resolve to a path is not guessed at');
 });
 
 test('reconcile: the runner\'s count against the hooks\' records, and a broken boundary counted', () => {

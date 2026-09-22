@@ -2,7 +2,7 @@
 
 Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
 
-Draft 5, 2026-09-22 (draft 1 on 2026-09-12; draft 2 added the Vite plugin, the Playwright fixture, and the engine-counter survey; draft 3 removed the import line from Playwright projects through the worker hook; draft 4 recorded the move to its own library; draft 5 records what the runtime writes down when its evidence is cut off or a file could not be instrumented, 1.0.14). Born inside DeepTest under `src/witness/` and `hooks/` in 1.0.6, proven on the ports through 1.0.8, and its own library, `@projectrevivesolutions/witness` at `C:\workspace\MikeVan's AI Development Toolkit\Witness`, from 1.0.9 (see "Where it lives").
+Draft 6, 2026-09-22 (draft 1 on 2026-09-12; draft 2 added the Vite plugin, the Playwright fixture, and the engine-counter survey; draft 3 removed the import line from Playwright projects through the worker hook; draft 4 recorded the move to its own library; draft 5 records what the runtime writes down when its evidence is cut off or a file could not be instrumented, 1.0.14; draft 6 adds the Jest hooks and corrects what section 8 said about which runners still instrument themselves, 1.0.16). Born inside DeepTest under `src/witness/` and `hooks/` in 1.0.6, proven on the ports through 1.0.8, and its own library, `@projectrevivesolutions/witness` at `C:\workspace\MikeVan's AI Development Toolkit\Witness`, from 1.0.9 (see "Where it lives").
 
 ## 1. Why it exists
 
@@ -65,6 +65,39 @@ Only what the page runs is counted. Playwright's own loader transforms whatever 
 
 The engine counters were surveyed for this runner and work: a reporter attached over the DevTools protocol to the browser Playwright launched (`--remote-debugging-port` through `launchOptions`) reads `Profiler.takePreciseCoverage` per page with call counts and block detail, with nothing in the project at all. They do not ship in 1.0.7 for attribution because Playwright does not await a reporter's `onTestBegin` and `onTestEnd`, so the boundary they see is late by up to a test, and a number that is right most of the time is the wrong kind of number for density. They remain the path for whole-run coverage without cooperation and for the second, independent count.
 
+## 5c. Jest (`hooks/witness-jest-transform.cjs`, `witness-jest-runtime.cjs`, `witness-jest.cjs`)
+
+Jest neither uses Vite nor honours Node's loader hooks, because `jest-runtime`
+owns its own module registry, so the seam is a transformer. Jest's transform
+contract is synchronous, and this instrumenter is not, so the transformer does
+not instrument: a driver instruments every source before the run, writes the
+result under `WITNESS_INSTRUMENTED_DIR` mirroring each file's path relative to
+the source root, and the transformer substitutes that text for the source and
+hands it to the project's own transformer, which the driver passes in as an
+option. The project's transform patterns are its own, wrapped one by one, so a
+project that transforms other file types keeps doing so.
+
+The instrumenting therefore happens in front of the project's transformer
+rather than behind it, and that ordering is the point rather than a
+concession. Witness rewrites source on the source's own lines; Babel compiles
+around the counters and the numbers stay in the coordinates the editor uses.
+Instrumenting the transformer's output would put them in compiled coordinates
+and need a source map, which is what the Angular path exists to demonstrate the
+cost of.
+
+The cache key is the upstream transformer's key computed over the instrumented
+text, salted with that text. Hashing it covers both things a stale cache could
+miss at once, since it changes when the source changes and when the
+instrumenter's behaviour changes, and the salt is what protects a project whose
+transformer keys on a file path rather than on the text it is given.
+
+The maps are embedded in each instrumented file. Jest gives every test file its
+own module registry and its own global, so the runtime is fresh per test file
+and a registration made anywhere else would not be visible; an instrumented
+module registers itself with whatever runtime it lands beside. For the same
+reason the whole-run counters are written when each test file finishes rather
+than at process exit, and reset afterwards so each report is a delta.
+
 ## 6. What proves it
 
 `test/witness.test.ts`, all under `npm test`, in the Witness tree and in DeepTest's:
@@ -91,6 +124,6 @@ There are no runtime dependencies between DeepTest and UntangleIt, because they 
 ## 8. Not yet
 
 - Code a Playwright test runs in Node rather than in the page. Playwright's loader owns the worker; the seam for it is a transform Playwright would have to expose, or the engine counters through `node:inspector` in the worker, which is the same second layer as below.
-- Jest, Vitest, and the Angular builder keep their own instrumenters in 1.0.6 and 1.0.7. Moving them onto Witness is the work that turns six drivers into one attribution core with three adapters each (an instrumenter, a transport, a boundary), and it comes after Witness has been on the Marketplace under Mocha.
+- Angular keeps its own instrumentation. Vitest moved onto Witness in 1.0.11 and Jest in 1.0.16, so what is left is the Angular builder under Vitest and under Karma, both measuring through the builder's istanbul and mapping its chunks back to sources. That is the work that turns the remaining drivers into one attribution core with three adapters each (an instrumenter, a transport, a boundary). It is not only about having one instrument: the Angular figures disagree with the source on plain TypeScript as well as on components, while the two runners already on Witness agree with it and with each other (see the engineering notes for both tables).
 - The engine counters (`Profiler.startPreciseCoverage` / `takePreciseCoverage` through `node:inspector` and the DevTools protocol) are the path for code Witness cannot transform: bundles a builder already produced, browser pages, Playwright component tests. They also give a second, independent count of the same run to check the first against.
 - `outcomes` and `entered` are recorded and not yet read. DeepTest's route confirmation and UntangleIt's fingerprint gate are the readers.

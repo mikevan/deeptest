@@ -1563,3 +1563,86 @@ now. The product was never wrong; `out/src/ui/words.js` and `dist/extension.js`
 both carried the check. That is twice in one day that a tool meant to catch
 something reported only what it already knew how to say, which is the same
 shape as the generated-string test above.
+
+## Jest on Witness, and why the instrumenting moved to the front (1.0.16)
+
+The plan said wrap the project's transformer and instrument its output. That
+wording was written before anyone read Jest's transformer contract, and it
+collides with it twice over.
+
+Jest 30's own types settle the first collision: "`require` will always use
+`process`, and `import` will use `processAsync` if it exists, otherwise fall
+back to `process`" (@jest/transform, index.d.ts). Babel compiles the port's
+`import` statements to `require`, so the synchronous path is the one that
+runs. `createInstrumenter` is asynchronous because tree-sitter initialises its
+WASM asynchronously, and there is no synchronous way in. Reaching the
+instrumenter from inside `process` would mean blocking on a worker thread
+through Atomics, which is a bridge built to preserve a sentence.
+
+The second collision is the one that matters more. Instrumenting the
+transformer's output means instrumenting Babel's compiled JavaScript, whose
+lines are not the editor's, so the counters would need a source map to get
+home. That is the shape the Angular path spent 1.0.15 escaping, and building
+it deliberately on a second runner would have been a strange way to spend the
+day.
+
+So the instrumenting goes in front. Witness rewrites source textually, on the
+source's own lines, which is what it is built to do and where its maps are
+already right. Babel then compiles around the counters, which are ordinary
+function calls, and the numbers stay in source coordinates with no map
+anywhere. `witnessUniverse` gained an optional `{ sourceRoot, instrumentedDir }`
+and now produces both halves from one parse, the universe and the instrumented
+text, which is the honest reading of "one instrument": the same parse decides
+what is executable and what gets counted.
+
+Maps are embedded in each instrumented file rather than registered by the
+driver. Jest gives every test file its own module registry and its own global,
+so a registration performed while instrumenting would be invisible by the time
+a module is required. The embedded-maps path already existed for the browser,
+where there is no other way to tell a page about a file, and it fits here for
+the same reason.
+
+The risky assumption was checked before anything was built, not after.
+Witness instruments `greet.js`, Babel compiles it with the port's real presets,
+and all sixteen counters survive, as do all eighty-one in the villain and both
+in the JSX component. Running the compiled result, `hello("Jeff")` returns
+`"Hello, Jeff!"` and the attributed lines come back as 4 and 7, which are
+`if (!name) {` and the return statement in the source.
+
+Equivalence with the Istanbul path it replaces is the end-to-end test, which
+was not weakened to accommodate the change: it pins line 4 to exactly one
+test, line 2 to exactly two, line 8 to none, line 25 as executed at import but
+under no test, the over/met/short/untested/unreachable statuses, and the three
+route steps of the worst line. All of it passes with Witness in place of
+babel-plugin-istanbul.
+
+### Two runners that agree
+
+The react-jest and react-vitest ports are the same program in two dialects,
+and at 1.0.16 they report the same numbers file for file: the component 1 of
+1, `greet` 9 of 9, `names` 8 of 18, the villain 0 of 49. Different runner,
+different transform pipeline, one instrument, one answer. Set that against the
+Angular table in the 1.0.15 notes, where the Istanbul-measured paths give 13
+and 18 for the same `names` file and 4, 5, and 2 for the same component, and
+the case for the Angular migration stops being about tidiness.
+
+### What this cost in avoidable time
+
+The first Jest run died with `Module ^/...test/ in the setupFilesAfterEnv
+option was not found`. Jest's CLI options are yargs arrays, an array swallows
+every following word until the next flag, and the test-path filter sat after
+them. That is the same rule the Angular driver hit in 1.0.4, written down in
+these notes as one flag per value, and it was read this morning while
+restoring that driver. The filter now goes ahead of every flag.
+
+The cache-key test was worse, because it passed while proving nothing. It
+wrapped a stub transformer whose `getCacheKey` hashed the text it was handed,
+so the key moved when the instrumented text moved whether or not the salt was
+there. Deleting the salt did not fail it. The salt exists for the opposite
+kind of transformer, one that keys on a file path or its own config and
+ignores the text, which would hand back the same key after the instrumenter's
+output changed underneath it and let Jest serve a stale transform. The test
+now wraps such a transformer as well, and deleting the salt fails it. A test
+that cannot fail on the code it guards is the same defect as the Angular
+runner-config test in 1.0.15, found twice in one day by the same habit of
+mutating the code to see whether the test notices.

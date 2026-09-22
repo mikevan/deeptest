@@ -329,6 +329,38 @@ export function enginePackages(runner: Runner, workspaceRoot: string): string[] 
   return [runner];
 }
 
+/** The parts of `jest --showConfig`'s resolved project config this driver reads. */
+export interface JestResolvedConfig {
+  /** [pattern, resolved transformer path, its options]. Jest fills in its default (babel-jest) when a project sets none. */
+  transform?: Array<[string, string, unknown]>;
+  setupFiles?: string[];
+  setupFilesAfterEnv?: string[];
+}
+
+/**
+ * The project's transform table with every transformer wrapped by ours, and
+ * the original passed through as an option so the wrapper can call it. The
+ * patterns are the project's own, untouched, so a project that transforms
+ * different file types differently keeps doing exactly that.
+ *
+ * Undefined when the resolved config could not be read or names no
+ * transformer, because there is then nothing to wrap and instrumenting
+ * nothing would measure nothing.
+ */
+export function witnessTransform(entries: Array<[string, string, unknown]> | undefined, witnessTransformPath: string): Record<string, [string, { upstream: [string, unknown] }]> | undefined {
+  if (!entries || entries.length === 0) {
+    return undefined;
+  }
+  const table: Record<string, [string, { upstream: [string, unknown] }]> = {};
+  for (const [pattern, modulePath, options] of entries) {
+    if (typeof pattern !== 'string' || typeof modulePath !== 'string') {
+      return undefined;
+    }
+    table[pattern] = [witnessTransformPath, { upstream: [modulePath, options ?? {}] }];
+  }
+  return table;
+}
+
 export interface TsCoverageOptions {
   /** Absolute folder holding the hook files (jest.cjs, vitest.mjs, the Witness runtime and loader, and so on). */
   hooksDir: string;
@@ -733,7 +765,6 @@ export class TypeScriptCoverageSource implements CoverageSource {
     }
     const { workDir, attrDir, coverageDir, hookDir, env } = this.prepareWorkDir(ctx);
     const { extraArgs } = tsFields(ctx.settings);
-    const sourceGlobRoot = ctx.settings.sourceRoot || '.';
     const testsPath = ctx.settings.testsPath;
 
     let output = '';
@@ -748,49 +779,68 @@ export class TypeScriptCoverageSource implements CoverageSource {
       throw new Error(`${runner} is not installed. Run npm install.`);
     }
     if (runner === 'jest') {
+      // Witness measures this run, so Jest's own coverage is not asked for at
+      // all. The instrumenting happens before Jest starts, because Jest's
+      // transform contract is synchronous and the instrumenter is not; the
+      // transformer wraps the project's own and substitutes the instrumented
+      // text for the source. See hooks/witness-jest-transform.cjs.
       const bin = path.join(moduleDir, 'bin', 'jest.js');
       const shown = await runProcess('node', [bin, '--showConfig'], { cwd: ctx.workspaceRoot, signal: ctx.signal });
-      let existingSetup: string[] = [];
-      let existingCollect: string[] = [];
+      let resolved: JestResolvedConfig | undefined;
       try {
-        const cfg = JSON.parse(shown.stdout) as { configs?: Array<{ setupFilesAfterEnv?: string[]; collectCoverageFrom?: string[] }> };
-        existingSetup = cfg.configs?.[0]?.setupFilesAfterEnv ?? [];
-        existingCollect = cfg.configs?.[0]?.collectCoverageFrom ?? [];
+        resolved = (JSON.parse(shown.stdout) as { configs?: JestResolvedConfig[] }).configs?.[0];
       } catch {
-        ctx.log('Could not read the Jest config (jest --showConfig); running with the hook alone.');
+        resolved = undefined;
       }
-      const collect =
-        existingCollect.length > 0
-          ? existingCollect
-          : [
-              `${sourceGlobRoot === '.' ? '' : `${sourceGlobRoot}/`}**/*.${SOURCE_GLOB_EXTENSIONS}`,
-              '!**/node_modules/**',
-              '!**/*.test.*',
-              '!**/*.spec.*',
-              '!**/__tests__/**',
-              '!**/*.d.ts',
-              '!**/.deeptest/**',
-              ...(testsPath ? [`!${testsPath}/**`] : []),
-            ];
+      const sourceRoot = path.join(ctx.workspaceRoot, ctx.settings.sourceRoot || '');
+      const wasmDir = this.options.wasmDir ?? runtimeEnvironment().wasmDir;
+      const instrumentedDir = path.join(workDir, 'instrumented');
+      const relSourceRoot = ctx.settings.sourceRoot || '';
+      const walked = walkSources(sourceRoot)
+        .map((rel) => (relSourceRoot ? `${relSourceRoot}/${rel}` : rel))
+        .filter((rel) => !isTestFile(rel) && !(testsPath && rel.startsWith(`${testsPath}/`)));
+      extra = await witnessUniverse(ctx.workspaceRoot, walked, wasmDir, ctx.log, { sourceRoot, instrumentedDir });
+      const transform = witnessTransform(resolved?.transform, path.join(hookDir, 'witness-jest-transform.cjs'));
+      if (!transform) {
+        // Without the project's resolved transform there is nothing to wrap,
+        // and instrumenting nothing would produce a run that measures nothing.
+        // Saying so beats running: the evidence check refuses that run anyway,
+        // and this names the cause instead of leaving it to be deduced.
+        ctx.log('Could not read the Jest config (jest --showConfig), so the project\'s own transformer could not be wrapped and nothing would be measured.');
+        throw new Error('DeepTest could not read this project\'s Jest configuration, so it cannot measure the run. Press "Show the log" to see what "jest --showConfig" reported.');
+      }
       const args = [
         bin,
-        '--coverage',
-        '--coverageProvider=babel',
-        '--coverageReporters=json',
-        `--coverageDirectory=${coverageDir}`,
+        // The test-path filter goes ahead of every flag. Jest's CLI options are
+        // yargs arrays, and an array swallows each following word until the
+        // next flag, so a positional after them is read as one more setup file
+        // and the run dies with "Module ^/...\test\/ in the setupFilesAfterEnv
+        // option was not found". That is the same rule the Angular driver hit,
+        // written down there as one flag per value.
+        ...(testsPath ? [`^${escapeRegex(path.join(ctx.workspaceRoot, testsPath).split(path.sep).join('/'))}/`] : []),
         '--ci',
-        '--setupFilesAfterEnv',
-        ...existingSetup,
-        path.join(this.options.hooksDir, 'jest.cjs'),
-        '--collectCoverageFrom',
-        ...collect,
+        '--transform',
+        JSON.stringify(transform),
+        // Ours first in both lists. The runtime has to exist before any
+        // instrumented module's prologue runs, and a project's own setup file
+        // may import source; the boundary has to register its beforeEach
+        // before a project's, so begin() runs before anything a project's hook
+        // touches.
+        ...['--setupFiles', path.join(hookDir, 'witness-jest-runtime.cjs')],
+        ...(resolved?.setupFiles ?? []).flatMap((f) => ['--setupFiles', f]),
+        ...['--setupFilesAfterEnv', path.join(hookDir, 'witness-jest.cjs')],
+        ...(resolved?.setupFilesAfterEnv ?? []).flatMap((f) => ['--setupFilesAfterEnv', f]),
         ...splitArgs(extraArgs),
       ];
-      if (testsPath) {
-        args.push(`^${escapeRegex(path.join(ctx.workspaceRoot, testsPath).split(path.sep).join('/'))}/`);
-      }
+      const witnessEnv = {
+        ...env,
+        [WITNESS_ENV.wasmDir]: wasmDir,
+        [WITNESS_ENV.sourceRoot]: sourceRoot,
+        [WITNESS_ENV.coverageDir]: coverageDir,
+        [WITNESS_ENV.instrumentedDir]: instrumentedDir,
+      };
       ctx.log(`$ node ${args.join(' ')}`);
-      const run = await runProcess('node', args, { cwd: ctx.workspaceRoot, env, log: ctx.log, signal: ctx.signal });
+      const run = await runProcess('node', args, { cwd: ctx.workspaceRoot, env: witnessEnv, log: ctx.log, signal: ctx.signal });
       output = run.output;
       exitCode = run.exitCode;
     } else {
@@ -863,6 +913,9 @@ export class TypeScriptCoverageSource implements CoverageSource {
     const coverageDir = path.join(workDir, 'coverage');
     fs.rmSync(attrDir, { recursive: true, force: true });
     fs.rmSync(coverageDir, { recursive: true, force: true });
+    // A source file that has since been deleted would otherwise leave its
+    // instrumented copy here, and the transformer would serve it.
+    fs.rmSync(path.join(workDir, 'instrumented'), { recursive: true, force: true });
     fs.mkdirSync(attrDir, { recursive: true });
     // The hook and its helper are copied into .deeptest/ and loaded from there
     // (see hooks/vitest.mjs for why); the helper is found through the
@@ -1241,7 +1294,13 @@ export function parseMochaSummary(output: string, exitCode: number | null): Test
  * instrumenter in this process: the same rules as the counters, so a loaded
  * file and an unloaded one are measured alike. Every line is untested.
  */
-export async function witnessUniverse(workspaceRoot: string, relativePaths: string[], wasmDir: string, log: (line: string) => void): Promise<FileCoverage[]> {
+export async function witnessUniverse(
+  workspaceRoot: string,
+  relativePaths: string[],
+  wasmDir: string,
+  log: (line: string) => void,
+  write?: { sourceRoot: string; instrumentedDir: string },
+): Promise<FileCoverage[]> {
   if (relativePaths.length === 0) {
     return [];
   }
@@ -1250,7 +1309,22 @@ export async function witnessUniverse(workspaceRoot: string, relativePaths: stri
   for (const rel of relativePaths) {
     const abs = path.join(workspaceRoot, rel);
     try {
-      const maps = instrumenter.mapsOnly(abs.split(path.sep).join('/'), fs.readFileSync(abs, 'utf8'));
+      // With `write`, the same parse produces both halves: the executable-line
+      // universe, and the instrumented text a synchronous transformer can hand
+      // to the project's own (Jest, where the instrumenter cannot run inside
+      // the transform). The maps are embedded, so each instrumented module
+      // registers itself with whatever runtime it lands beside; Jest gives
+      // every test file its own global, and a registration performed in one
+      // sandbox is not visible in the next.
+      const maps = write
+        ? (() => {
+            const instrumented = instrumenter.instrument(abs.split(path.sep).join('/'), fs.readFileSync(abs, 'utf8'), true);
+            const target = path.join(write.instrumentedDir, path.relative(write.sourceRoot, abs));
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            fs.writeFileSync(target, instrumented.code, 'utf8');
+            return instrumented.maps;
+          })()
+        : instrumenter.mapsOnly(abs.split(path.sep).join('/'), fs.readFileSync(abs, 'utf8'));
       const lines = new Map<number, Set<string>>();
       for (const stmt of Object.values(maps.statementMap)) {
         lines.set(stmt.start.line, new Set());
