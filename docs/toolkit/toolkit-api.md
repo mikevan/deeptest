@@ -2,7 +2,7 @@
 
 Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
 
-Draft 5, 2026-09-12 (draft 4 was 2026-09-11, draft 3 2026-09-09, draft 2 2026-09-06). Publisher: `prs` (Project Revive Solutions, LLC). Companion to toolkit-architecture.md. This is the contract between tools. Anything not written here is private to a tool and may change without notice.
+Draft 6, 2026-09-22 (draft 5 was 2026-09-12, draft 4 2026-09-11, draft 3 2026-09-09, draft 2 2026-09-06). Draft 6 cut this document back to what is built. Five silent commands, an event surface, a public record file, and an integration between DeepTest and UntangleIt were published here and did not exist in either tool. They are in section 10 now, and section 10 is not the contract. A test in DeepTest's suite fails when anything above section 10 says something the code does not do. Publisher: `prs` (Project Revive Solutions, LLC). Companion to toolkit-architecture.md. This is the contract between tools. Anything not written here is private to a tool and may change without notice.
 
 Draft 4 change: the untangling tool is named **UntangleIt**. The Marketplace upload under its first display name was refused by the similarity check ("refactorix already exists"), and a dormant Visual Studio extension by mynkow (last active around 2017) shares that first name on the Marketplace website. The tool was unpublished, so the rename is free: id `prs.untangleit`, commands `untangleit.*`, records `.untangleit/`, folder `C:\workspace\MikeVan's AI Development Toolkit\UntangleIt`, repo `mikevan/untangleit`. The pack folder and repo are `MADTPackage`.
 
@@ -33,10 +33,17 @@ Tools built to this document also declare themselves in `package.json` so a futu
 "prsToolkit": {
   "protocol": 1,
   "verb": "measure and judge",
-  "commands": ["deeptest.api.status", "deeptest.api.check", "deeptest.api.function"],
-  "records": [".deeptest/decisions.json", ".deeptest/last-check.json"]
+  "commands": [],
+  "records": [".deeptest/decisions.json"]
 }
 ```
+
+`commands` lists a tool's **silent** commands and nothing else, because those
+are the ones a sibling can call without a person in the room. Interactive
+commands are for people and are listed in section 3, not here. DeepTest's array
+is empty on purpose: it publishes no silent command today. An empty array is a
+fact about the tool, not a gap in the block, and a tool with no silent commands
+still declares the block so a sibling can read its verb and its records.
 
 A caller reads this through `extension.packageJSON.prsToolkit`. KeepSafe has no such block and never will; callers carry a fixed entry for it. That is the one exception, and it is written down here so it is not copied. (The block key `prsToolkit` and the pack id `prs.MADTPackage` are machine identifiers under the `prs` publisher; the toolkit's name in every sentence a person reads is MikeVan's AI Development Toolkit.)
 
@@ -67,7 +74,18 @@ Every silent result has the same envelope:
 | `keepsafe.restoreLatestCheckpoint` | interactive | Confirms with the person, then restores the newest checkpoint. |
 | `keepsafe.restoreCheckpoint`, `keepsafe.listCheckpoints`, `keepsafe.diffCheckpoints` | interactive | Pick from a list, then act. |
 
-Callers use `keepsafe.quickCheckpoint` before a hand-off and `keepsafe.restoreLatestCheckpoint` when offering the undo. Because these prompt in KeepSafe's own words, a caller's gate sentence says what KeepSafe is about to do, then KeepSafe says what it did. There is no silent KeepSafe command; the caller cannot learn the checkpoint's id from the command, so it reads the records channel instead (section 4).
+Of these, our tools call exactly one: `keepsafe.quickCheckpoint`, before a
+hand-off, in both DeepTest and UntangleIt. Because it prompts in KeepSafe's own
+words, a caller's gate sentence says what KeepSafe is about to do, then KeepSafe
+says what it did. There is no silent KeepSafe command, and nothing in this
+toolkit reads KeepSafe's files; the undo is the person's, in KeepSafe's own
+screens. An earlier draft said callers use `keepsafe.restoreLatestCheckpoint`
+for the undo and that DeepTest reads KeepSafe's manifests. Neither was ever
+built. See section 10.
+
+The rest of the table is KeepSafe's published surface, recorded here because a
+caller may use it. KeepSafe is not our repository, so the contract test checks
+only the one command our code actually invokes.
 
 ### 3.2 DeepTest
 
@@ -76,10 +94,9 @@ Callers use `keepsafe.quickCheckpoint` before a hand-off and `keepsafe.restoreLa
 | `deeptest.run` | interactive | none | Runs a check with the side panel open. |
 | `deeptest.fix` | interactive | `{ path, line }` | The gated hand-off for one line. |
 | `deeptest.fixFunction` | interactive | `{ path, line }` | The choice, the gates, the hand-off for one function. The refactor choice routes to `untangleit.method` when UntangleIt is installed. |
-| `deeptest.api.status` | silent | none | `{ checked: boolean, at, ready, verdict, coverage, densityPassRate, untestedLines, shortLines, complexFunctions: [{ path, name, startLine, endLine, complexity, campbell, mbcc, limit }] }` from the last check, without running one. `complexity` is ways through (cyclomatic); `campbell` and `mbcc` are the two tangle numbers (from 0.4.0). |
-| `deeptest.api.check` | silent | `{ }` | Runs a check and returns the same shape as status. Long-running; the caller shows its own progress. |
-| `deeptest.api.function` | silent | `{ path, startLine }` | All three numbers, limit, the lines inside it that are short, and the decision state for one function. What UntangleIt asks before and after it untangles. |
-| `deeptest.api.decisions` | silent | none | The decisions file as data. |
+
+DeepTest publishes no silent command. Four were described in draft 5 and none
+of them existed; they are in section 10.
 
 ### 3.3 UntangleIt
 
@@ -88,34 +105,50 @@ Callers use `keepsafe.quickCheckpoint` before a hand-off and `keepsafe.restoreLa
 | `untangleit.method` | interactive | `{ path, startLine }` | The full loop on one method: show, checkpoint, confirm, transform, verify, report. What DeepTest's "Break it into smaller pieces" calls when UntangleIt is installed. |
 | `untangleit.worst` | interactive | none | The loop on the most tangled method in the workspace. |
 | `untangleit.api.measure` | silent | `{ path }` | Methods in the file with all three numbers: `{ name, startLine, endLine, cyclomatic, campbell, mbcc, waysThrough, over }`. `waysThrough` equals `cyclomatic` and stays for callers written against 0.1.x; `over` is `mbcc` above the limit (0 when within). (0.1.x returned `waysThrough` and an `over` on ways through; from 0.1.11 all three, measured by the shared library, and `over` on tangle.) The result's `limit` is the tangle limit. |
-| `untangleit.api.plan` | silent | `{ path, startLine, limit }` | What the mechanical engine would do, as a list of steps, without doing it. Lets a caller show the plan before the gates. |
 
 ## 4. Records on disk
 
 The slow channel, and the only way to read history. Each tool owns one folder at the workspace root and writes only there. Files listed here are public; their shape carries a `version` field and changes only additively.
 
-| Tool | Folder | Public files | Meaning |
+| Tool | Folder | Public file | Meaning |
 |---|---|---|---|
-| KeepSafe | `.keepsafe/` | `checkpoints/<id>/manifest.json`, `checkpoints/<id>/checkpoint.txt` | One folder per checkpoint; the id is a sequence-prefixed slug; the manifest is structured metadata (documented in KeepSafe's README, so reading it is within its published contract). `index.sqlite3` and `blobs/` are private. |
-| DeepTest | `.deeptest/` | `decisions.json`, `last-check.json` (proposed) | The person's decisions, meant to be committed; the last verdict and its numbers, with the id of the newest KeepSafe checkpoint at the time if one exists. `coverage/` and `attribution/` are private and regenerated. |
-| UntangleIt | `.untangleit/` | `runs.json` | One entry per run: method, before and after numbers, pieces produced, verified or stopped and why. |
+| DeepTest | `.deeptest/` | `.deeptest/decisions.json` | The person's decisions about lines and functions, meant to be committed. `coverage/`, `attribution/`, `instrumented/`, and the generated runner configs are private and regenerated on every run. |
+| UntangleIt | `.untangleit/` | `.untangleit/runs.json` | One entry per run: method, before and after numbers, pieces produced, verified or stopped and why. |
 
-This is how a verdict gets attached to a checkpoint without touching KeepSafe: DeepTest reads the newest `manifest.json` after a check and writes its id into `last-check.json`. A later tool that wants "restore the last state DeepTest called ready" joins the two files and calls `keepsafe.restoreCheckpoint`, where the person picks the named checkpoint.
+Two files, both written by the tool that owns them. KeepSafe's files are real
+and are documented in KeepSafe's own README, but nothing in this toolkit reads
+them, so they are not part of this channel; see section 10.
 
 ## 5. Events
 
 VS Code has no event bus between extensions, so there are two ways to be told something happened, and callers pick by need:
 
-- **Watch the records.** `vscode.workspace.createFileSystemWatcher` on a sibling's public files. This is how a tool learns a KeepSafe checkpoint was taken (a new `manifest.json`) or that DeepTest finished a check (`last-check.json` changed). Works with KeepSafe unmodified.
-- **Exports, for tools built to this document.** A tool returns an object from `activate` with `onDidCheck`, `onDidDecide`, and the same functions as its silent commands. A caller reads it through `getExtension(id).exports` after `activate()`. Exports are a convenience over the commands, never a replacement: everything reachable through exports is reachable through a command, so a tool written in another language or process is not shut out.
+- **Watch the records.** `vscode.workspace.createFileSystemWatcher` on a
+  sibling's public file. A change to `.deeptest/decisions.json` or
+  `.untangleit/runs.json` is a thing that happened.
+- **Exports.** A tool returns an object from `activate`, read through
+  `getExtension(id).exports` after `activate()`. What they return today:
 
-## 6. The three flows: two built, one next
+| Tool | Exported from `activate` |
+|---|---|
+| DeepTest | `{ state, run, report }` |
+| UntangleIt | `{ state, run }` |
+
+  `state` is the tool's result state, `run()` performs the tool's own verb, and
+  DeepTest's `report()` returns the current report model or `undefined` before
+  the first run. These are a convenience for a tool in the same process;
+  everything a sibling needs across processes goes through commands and
+  records. No tool publishes events. Draft 5 said both published `onDidCheck`
+  and `onDidDecide`; neither ever did. See section 10.
+
+## 6. The flows that are built
 
 **Hand-off with an undo (built).** DeepTest checks `KeepSafe.keepsafe` is installed and `deeptest.keepSafe.offerCheckpoint` is on; offers; on yes calls `keepsafe.quickCheckpoint`; then the modal; then the brief. If the command throws, DeepTest says KeepSafe could not create the checkpoint and sends nothing.
 
 **Untangle from DeepTest (built, DeepTest 0.4.3 and UntangleIt 0.1.9, 2026-09-11).** On "Break it into smaller pieces", DeepTest checks for `prs.untangleit`. If present, it calls `untangleit.method` with `{ path, startLine }` (path relative to the workspace folder) and stops; UntangleIt runs its own gates and its own report, and DeepTest records no decision because the person has not yet said yes. If absent, DeepTest uses its own brief and gates, and its setup screen recommends UntangleIt once, with a link. UntangleIt measures the file on demand when the method is not in its last measure, so the call works on a fresh editor. Either way DeepTest judges on the next check. The refactor brief in DeepTest stays as the not-installed fallback.
 
-**Verdict on a checkpoint (next).** After each check DeepTest writes `last-check.json` including the newest KeepSafe checkpoint id. No new KeepSafe surface needed.
+Those two flows are the whole of what is built between the tools. A third was
+described in draft 5 and is in section 10.
 
 ## 7. Versioning and compatibility
 
@@ -124,7 +157,7 @@ VS Code has no event bus between extensions, so there are two ways to be told so
 ## 8. Open questions
 
 1. Should KeepSafe's fixed entry live in one shared, copied file (`src/siblings/keepsafe.ts` in every tool) or be generated from this document? Copied is simpler and matches "no shared code".
-2. `last-check.json`: commit it or ignore it? It is history, like decisions, but it changes on every run.
+2. If `last-check.json` is ever built (section 10): commit it or ignore it? It would be history, like decisions, but it would change on every run.
 3. Whether silent commands should accept a `folder` argument for multi-root workspaces, given KeepSafe always acts on the first folder.
 4. A toolkit-wide status command that any tool answers with its verb and version, so a future dashboard can list what is installed.
 
@@ -133,3 +166,54 @@ VS Code has no event bus between extensions, so there are two ways to be told so
 VS Code extension packs bundle independent extensions under one Marketplace page: a pack is an extension whose `package.json` lists ids in `extensionPack`, and the bundled extensions stay independently installable (Microsoft's own rule for packs: no functional dependency on the members). The toolkit ships one, `prs.MADTPackage` (folder and repo `MADTPackage`, display name "MikeVan's AI Development Toolkit"), containing only the list, an icon, and a README with the thesis and the three verbs: `KeepSafe.keepsafe`, `prs.deeptest`, `prs.untangleit`. It carries no code and changes nothing about how the tools talk; it changes how they are found. The pack itself installs as a fourth extension in the person's editor, which is where its icon and README are seen, and uninstalling it is how all three members are removed at once.
 
 Marketplace mechanics learned on 2026-09-11: the `icon` PNG ships inside the VSIX and serves both the Extensions list and the details page; README images are not read from the VSIX but rewritten by the packager to raw GitHub URLs from the `repository` field, so they show only once pushed. A display name too close to an existing listing is refused at upload. DeepTest packages with `--no-dependencies` because `@projectrevivesolutions/complexity` is a `file:../complexity` link that the packager would otherwise follow out of the project; the library is bundled into `dist/extension.js` by esbuild, so nothing from `node_modules` is needed.
+
+## 10. Proposed, not built
+
+Everything below this line is a design and nothing below it is a promise. No
+tool implements any of it, no caller may rely on it, and the contract test in
+DeepTest's suite stops reading at this heading. Sections 1 to 9 are the
+contract; section 10 is a notebook.
+
+It exists because draft 5 published all of it as though it were shipped, and
+the ideas are worth keeping even though the claims were not true.
+
+**Four silent commands for DeepTest.** `deeptest.api.status` would return the
+last check without running one: `{ checked, at, ready, verdict, coverage,
+densityPassRate, untestedLines, shortLines, complexFunctions: [{ path, name,
+startLine, endLine, complexity, campbell, mbcc, limit }] }`. `deeptest.api.check`
+would run a check and return the same shape, long-running, with the caller
+showing its own progress. `deeptest.api.function`, given `{ path, startLine }`,
+would return all three numbers, the limit, the short lines inside the function,
+and its decision state. `deeptest.api.decisions` would return the decisions file
+as data. Each would carry the section 3 envelope.
+
+**One silent command for UntangleIt.** `untangleit.api.plan`, given
+`{ path, startLine, limit }`, would return what the mechanical engine would do
+as a list of steps, without doing it, so a caller could show the plan before
+the gates.
+
+**Before and after, from UntangleIt.** UntangleIt would call
+`deeptest.api.function` before and after an untangling and report the change in
+all three numbers. It does not. After an untangling it tells the person to press
+"Check my code again" in DeepTest, and `UntangleIt\src\deeptest.ts` says so in
+its own header: UntangleIt does not call DeepTest.
+
+**`last-check.json`, and a verdict on a checkpoint.** After each check DeepTest
+would write `.deeptest/last-check.json` with the verdict, its numbers, and the
+id of the newest KeepSafe checkpoint at that moment. A later tool wanting
+"restore the last state DeepTest called ready" would join that file to
+KeepSafe's `manifest.json` and call `keepsafe.restoreCheckpoint`, where the
+person picks the named checkpoint. It needs no new KeepSafe surface, which is
+what makes it attractive. Nothing writes the file today.
+
+**KeepSafe's records.** `.keepsafe/checkpoints/<id>/manifest.json` and
+`checkpoints/<id>/checkpoint.txt` are real files, and KeepSafe's README
+documents the manifest, so reading them is within KeepSafe's published
+contract. No tool in this toolkit reads them. They would become part of the
+records channel the day one does, and not before.
+
+**Events from `activate`.** `onDidCheck` and `onDidDecide`, so a sibling in the
+same process could react without polling a file. Neither tool exposes either.
+
+A reader who wants any of this should treat it as a specification to build
+against, not as a description of the product.

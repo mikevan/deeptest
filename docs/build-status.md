@@ -2,7 +2,7 @@
 
 Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
 
-Updated 2026-09-22 (1.0.17, in the tree). Companion to vscode-density-extension-spec.md.
+Updated 2026-09-22 (1.0.18, in the tree). Companion to vscode-density-extension-spec.md.
 Source tree and VSIX live at C:\workspace\MikeVan's AI Development Toolkit\DeepTest on Michael's machine. The
 authoritative copy of this file is docs/build-status.md in that tree.
 Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
@@ -16,6 +16,54 @@ and every extension is tagged 1.0.0 together (DeepTest, UntangleIt, the
 pack, and the library). From here the minor number moves once per language
 across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
 numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
+
+## 2026-09-22, 1.0.18: the published contract is cut down to the product, and checked
+
+- `toolkit-api.md` is draft 6. Removed from the contract and moved to a new
+  section 10, "Proposed, not built": `deeptest.api.status`,
+  `deeptest.api.check`, `deeptest.api.function`, `deeptest.api.decisions`,
+  `untangleit.api.plan`, `.deeptest/last-check.json` and the
+  verdict-on-a-checkpoint flow, `onDidCheck` and `onDidDecide`, KeepSafe's
+  record files, and the before-and-after measurement UntangleIt was said to
+  make. Every one of them was published as shipped and none was built.
+- The current contract, all of it verified present in source: extension ids
+  and `getExtension` discovery; `deeptest.run`, `deeptest.fix`,
+  `deeptest.fixFunction`, `untangleit.method`, `untangleit.worst`, and the one
+  silent command `untangleit.api.measure`; the hand-off to `untangleit.method`
+  through `prs.untangleit`; `keepsafe.quickCheckpoint`;
+  `.deeptest/decisions.json` and `.untangleit/runs.json`; and the real
+  `activate` exports, `{ state, run, report }` and `{ state, run }`.
+- `DeepTest\package.json` gains a `prsToolkit` block: protocol 1, verb
+  "measure and judge", `commands: []`, `records: [".deeptest/decisions.json"]`.
+  Section 2 now states that `commands` lists silent commands only, which is
+  what makes the empty array correct rather than unfinished.
+- `test/contract.test.ts` (new) is the four rules, as a pure function over
+  facts gathered from the trees: registrations from `registerCommand` calls in
+  each tool's source, the block from each `package.json`, and record-write
+  evidence from a source file that carries `writeFileSync` and the folder and
+  file-name literals. It parses only the tables under `### 3.2 DeepTest`,
+  `### 3.3 UntangleIt`, and `## 4. Records on disk`, and cuts the document at
+  `## 10. Proposed, not built`, asserting that heading exists so the boundary
+  cannot be deleted quietly.
+- The second test in that file runs the same rules against trees built to
+  break each one, including a file whose only mention of a record path is a
+  comment. Six mutations of the real check were tried and all six failed it,
+  including moving `untangleit.api.measure` into section 10, which the block
+  rule catches: a real command cannot be demoted to proposed while discovery
+  still advertises it.
+- KeepSafe is checked only as far as is honest. The document must name
+  `keepsafe.quickCheckpoint`, and each tool's source must name that command
+  and no other. KeepSafe is not our repository.
+- Tests: 220 in DeepTest, two more than 1.0.17. complexity, Witness, and
+  UntangleIt untouched.
+- Verified on Michael's machine, 2026-09-22, through `release.ps1` with no
+  arguments: library mirrors byte for byte identical, complexity 104, Witness
+  12, UntangleIt 17, DeepTest 220, all five trees built and packaged at
+  1.0.17. Phase 0 mirrored draft 6 into `DeepTest\docs` first, so the contract
+  test ran against the document the release ships and the implementations as
+  they are built, not against a working copy.
+- Verify: that run. The contract test is only worth anything after phase 0,
+  because before it the mirror is whatever the last release left there.
 
 ## 2026-09-22, 1.0.17: Angular measures through Witness, and Istanbul leaves the product
 

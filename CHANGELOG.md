@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.0.18
+
+The published toolkit API now describes the product that exists, and a test
+fails when it stops describing it.
+
+`toolkit-api.md` published five silent commands, an event surface, a public
+record file, and an integration between DeepTest and UntangleIt. None of them
+existed in either tool. `deeptest.api.status`, `deeptest.api.check`,
+`deeptest.api.function`, and `deeptest.api.decisions` were never registered;
+neither was `untangleit.api.plan`; nothing wrote `.deeptest/last-check.json`;
+neither tool exposed `onDidCheck` or `onDidDecide`; and UntangleIt's own
+source says in its header that it does not call DeepTest. All of that is now
+in section 10, "Proposed, not built", which says in its first line that
+nothing below it is a promise.
+
+What the contract says today is what the code does. One silent command,
+`untangleit.api.measure`. Five interactive commands, all registered. The
+DeepTest to UntangleIt hand-off through `prs.untangleit`. One KeepSafe
+command, `keepsafe.quickCheckpoint`, with KeepSafe's own published surface
+kept as a record of someone else's contract rather than as a claim about
+ours. Two public record files, `.deeptest/decisions.json` and
+`.untangleit/runs.json`. The exports `activate` actually returns:
+`{ state, run, report }` from DeepTest and `{ state, run }` from UntangleIt.
+
+DeepTest gains the `prsToolkit` discovery block it had never had, which is the
+mechanism the whole document rests on. `prsToolkit.commands` now means silent
+commands and nothing else, so DeepTest's array is empty. An empty array is a
+fact about the tool, not a gap in the block.
+
+The test is the part that lasts. It reads the section headings and the tables
+under them, never backticks in prose, and it checks four things: every
+published command is registered by the tool that publishes it, each tool's
+`prsToolkit.commands` is exactly the silent commands published for it and
+every one is registered, both tools declare a complete block, and every public
+record path is demonstrably written by its owner. It stops reading at section
+10. A second test runs the same four rules against trees built to break each
+one, because rules that cannot fail prove nothing.
+
+No API was added. The document came down to the code.
+
 ## 1.0.17
 
 Angular measures through Witness, under both runners, and Istanbul is gone

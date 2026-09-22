@@ -11,7 +11,7 @@
   ],
   "description": "Checks an AI's work. Runs your tests, then shows, in plain words, which lines of code no test ever reached and how many tests each line needs. You decide what to do about it.",
   "icon": "media/deeptestLogo.png",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "publisher": "prs",
   "license": "GPL-3.0-only",
   "repository": {
@@ -31,12 +31,20 @@
     "onView:deeptest.sidebar"
   ],
   "main": "./dist/extension.js",
+  "prsToolkit": {
+    "protocol": 1,
+    "verb": "measure and judge",
+    "commands": [],
+    "records": [
+      ".deeptest/decisions.json"
+    ]
+  },
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
           "id": "deeptest",
-          "title": "DeepTest - Polyglot 1.0.17",
+          "title": "DeepTest - Polyglot 1.0.18",
           "icon": "media/deeptest.svg"
         }
       ]
@@ -46,9 +54,9 @@
         {
           "type": "webview",
           "id": "deeptest.sidebar",
-          "name": "DeepTest - Polyglot 1.0.17",
+          "name": "DeepTest - Polyglot 1.0.18",
           "icon": "media/deeptest.svg",
-          "contextualTitle": "DeepTest - Polyglot 1.0.17"
+          "contextualTitle": "DeepTest - Polyglot 1.0.18"
         }
       ]
     },
