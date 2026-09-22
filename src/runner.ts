@@ -18,7 +18,7 @@ import { runtimeEnvironment } from './languages/shared/runtime';
 import { LanguagePlugin, LanguageSettings } from './languages/types';
 import { ResultState } from './state';
 import { workspaceRootOf } from './ui/paths';
-import { nothingToScoreSentence, testsRan } from './ui/words';
+import { evidenceProblemSentence, nothingToScoreSentence, testsRan } from './ui/words';
 
 export interface RunnerDeps {
   extensionUri: vscode.Uri;
@@ -140,6 +140,16 @@ export async function runAnalysis(deps: RunnerDeps, folder: vscode.WorkspaceFold
     const why = nothingToScoreSentence(run.tests);
     log(`Refused to score: ${run.tests.passed} passed, ${run.tests.failed} failed, ${run.tests.errors} errors, ${run.tests.skipped} skipped, exit code ${run.tests.exitCode}. ${why}`);
     state.setError(why);
+    return;
+  }
+  // The tests ran. Now: did every one of them leave its evidence? A card
+  // drawn from a run with a hole in its attribution is a wrong card, and a
+  // wrong card is worse than none (1.0.14). The failure state is the one
+  // architecture section 7 names, with the reason and the three controls.
+  const hole = evidenceProblemSentence(run.evidence);
+  if (hole) {
+    log(`Refused to score: ${run.evidence.testsFinished} tests finished, ${run.evidence.testsRecorded} records, ${run.evidence.brokenBoundaries} broken boundaries. ${hole}`);
+    state.setError(hole);
     return;
   }
 

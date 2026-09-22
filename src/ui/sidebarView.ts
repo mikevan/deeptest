@@ -11,7 +11,7 @@ import { DecidedLine } from '../decisions/decisions';
 import { LineResult } from '../engine/types';
 import { describeReach } from '../report/plain';
 import { ResultState } from '../state';
-import { PRODUCT, PRODUCT_FULL, Voice, badge, decisionSentence, findingSentence, functionDecisionSentence, summaryRows, testsSentence, verdict } from './words';
+import { PRODUCT, PRODUCT_FULL, Voice, badge, decisionSentence, findingSentence, functionDecisionSentence, summaryRows, testsSentence, unmeasuredSentence, verdict } from './words';
 
 export interface SidebarMessage {
   type: 'run' | 'configure' | 'report' | 'output' | 'open' | 'fix' | 'accept' | 'undo' | 'decide' | 'fixFunction' | 'undoFunction' | 'toggleNumbers' | 'toggleOverlay';
@@ -188,6 +188,10 @@ ${this.body(voice)}
     parts.push(`<button class="primary" data-act="run">Check my code again</button>`);
     parts.push(`<div class="links"><a data-act="report">Full report</a><a data-act="configure">Change the setup</a><a data-act="output">Show the log</a></div>`);
     parts.push(`<p class="muted">${esc(testsSentence(run.tests))} in ${(run.durationMs / 1000).toFixed(1)} seconds, checked at ${esc(run.finishedAt.toLocaleTimeString())}.${stale ? ` <strong>${stale === 1 ? 'One file has' : `${stale} files have`} changed since then.</strong>` : ''}</p>`);
+    const unmeasured = unmeasuredSentence(result.summary);
+    if (unmeasured) {
+      parts.push(`<p><strong>${esc(unmeasured)}</strong></p>`);
+    }
 
     parts.push('<h2>What the tests say</h2>');
     const hardest = result.summary.complexFunctions[0];

@@ -2,7 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { scoreLine, summarize, analyzeFile } from '../src/engine/density';
 import { FileCoverage, FileStructure } from '../src/engine/types';
-import { badge, decisionSentence, findingSentence, functionFixRoute, hoverText, lineCaption, nothingToScoreSentence, refactorChoiceDescription, summaryRows, tangleSentence, testsRan, testsSentence, threeNumbers, untangleFailedSentence, untangleItSetupHint, untangleSentSentence, verdict } from '../src/ui/words';
+import { badge, decisionSentence, findingSentence, functionFixRoute, hoverText, lineCaption, nothingToScoreSentence, refactorChoiceDescription, summaryRows, tangleSentence, testsRan, testsSentence, threeNumbers, untangleFailedSentence, untangleItSetupHint, untangleSentSentence, verdict, evidenceProblemSentence, unmeasuredSentence, unmeasuredFileSentence, skippedSentence } from '../src/ui/words';
 
 const plain = { showNumbers: false };
 const numbers = { showNumbers: true };
@@ -178,4 +178,56 @@ test('nothingToScoreSentence says why the run was refused, in plain words', () =
     nothingToScoreSentence({ passed: 0, failed: 0, errors: 0, skipped: 0, exitCode: 0 }),
     'No test ran, so there is nothing to score. Press "Show the log" to see the test run.',
   );
+});
+
+test('evidenceProblemSentence: a hole in the attribution is named; a whole record is silence', () => {
+  const ok = { testsFinished: 3, testsRecorded: 3, brokenBoundaries: 0, reconcilable: true };
+  assert.equal(evidenceProblemSentence(ok), undefined);
+  assert.equal(evidenceProblemSentence({ ...ok, testsRecorded: 5 }), undefined, 'a retried test leaves two records; that is not a hole');
+  assert.equal(
+    evidenceProblemSentence({ ...ok, testsRecorded: 1 }),
+    '3 tests finished but only 1 left a record of the lines it reached, so 2 tests are unaccounted for. Nothing was scored. Press "Show the log" to see the test run.',
+  );
+  assert.equal(
+    evidenceProblemSentence({ ...ok, testsRecorded: 2 }),
+    '3 tests finished but only 2 left a record of the lines they reached, so 1 test is unaccounted for. Nothing was scored. Press "Show the log" to see the test run.',
+  );
+  assert.equal(
+    evidenceProblemSentence({ ...ok, brokenBoundaries: 1 }),
+    '1 test was cut off before it ended, so what it reached cannot be told apart from the next test. Nothing was scored. Press "Show the log" to see the test run.',
+  );
+  assert.equal(
+    evidenceProblemSentence({ ...ok, testsRecorded: 1, brokenBoundaries: 2 }),
+    '2 tests were cut off before they ended, so what they reached cannot be told apart from the next test. Nothing was scored. Press "Show the log" to see the test run.',
+    'a broken boundary is the worse finding and is named first',
+  );
+  assert.equal(evidenceProblemSentence({ ...ok, testsRecorded: 0, reconcilable: false }), undefined, 'coverage.py contexts cannot be counted against tests, and the sentence does not pretend they can');
+});
+
+test('an unmeasured file is not ready, is named on the card, and is out of every number', () => {
+  const good = analyzeFile(cov('a.py', { 1: ['t'], 2: ['t', 'u'] }), struct('a.py', { 1: 1, 2: 1 }));
+  const bad = analyzeFile({ path: 'b.py', lines: new Map(), executed: new Set(), unmeasured: 'Witness could not instrument it' }, undefined);
+  assert.equal(bad.unmeasured, 'Witness could not instrument it');
+  assert.deepEqual(bad.lines, []);
+  const s = summarize([good, bad], { maxFunctionComplexity: 10, minCoverage: 80, minAverageDensity: 1, minDensityPassRate: 90 });
+  assert.equal(s.files, 1, 'the unmeasured file is not a measured file');
+  assert.equal(s.coveragePercent, 100, 'and it does not drag coverage to zero');
+  assert.deepEqual(s.unmeasuredFiles, [{ path: 'b.py', reason: 'Witness could not instrument it' }]);
+  const v = verdict(s, tests, 0, 0);
+  assert.equal(v.ready, false);
+  assert.equal(v.headline, 'This is not ready: 1 file could not be measured.');
+  assert.equal(v.detail, '1 file could not be measured.');
+  assert.equal(unmeasuredSentence(s), '1 file could not be measured, so it is not in these numbers. It is listed in the full report.');
+  assert.equal(unmeasuredSentence(summarize([good])), '');
+  assert.equal(unmeasuredFileSentence({ path: 'b.py', reason: 'witness could not instrument it.' }), 'b.py could not be measured. Witness could not instrument it.');
+});
+
+test('skipped decisions are counted and said, per file', () => {
+  const f = analyzeFile({ ...cov('a.ts', { 1: ['t'], 4: ['t'] }), skipped: [{ line: 4, reason: 'why' }, { line: 2, reason: 'why' }] }, struct('a.ts', { 1: 1, 4: 1 }));
+  assert.deepEqual(f.skipped, [{ line: 2, reason: 'why' }, { line: 4, reason: 'why' }]);
+  assert.equal(summarize([f]).skippedDecisions, 2);
+  assert.equal(skippedSentence(f.skipped), '2 decisions on lines 2, 4 could not be counted, so which way they went is unknown. The lines are still counted as run or not run.');
+  assert.equal(skippedSentence([{ line: 9, reason: 'why' }]), '1 decision on line 9 could not be counted, so which way it went is unknown. The line is still counted as run or not run.');
+  assert.equal(skippedSentence([]), '');
+  assert.equal(f.lines.length, 2, 'a skipped decision does not remove its line');
 });

@@ -78,11 +78,39 @@ export interface TestRunSummary {
   exitCode: number | null;
 }
 
+/**
+ * What the run's attribution says about itself. The runner reports how many
+ * tests finished; the hooks write one record per test. When the two
+ * disagree, or a record says its boundary was cut, the evidence has a hole
+ * in it and the runner refuses to draw a card from it (architecture section
+ * 7, "The check did not finish.") rather than show a number that looks
+ * measured and is not.
+ */
+export interface Evidence {
+  /** Tests the runner reported as finished: passed plus failed. */
+  testsFinished: number;
+  /** Per-test attribution records the hooks wrote. */
+  testsRecorded: number;
+  /**
+   * Records whose test boundary was broken: a test began while another was
+   * still open, or a test was still open when its process ended. Each one
+   * is a record that credits lines to a test that did not run them alone.
+   */
+  brokenBoundaries: number;
+  /**
+   * Whether the two counts can be held against each other. coverage.py's
+   * contexts appear only where a test touched a measured line, so a test
+   * that touched none leaves no record and the counts are not comparable.
+   */
+  reconcilable: boolean;
+}
+
 export interface CoverageRun {
   coverages: FileCoverage[];
   tests: TestRunSummary;
   /** Source files measured, workspace-relative, forward slashes. */
   measuredFiles: string[];
+  evidence: Evidence;
 }
 
 export interface EnvironmentCheck {

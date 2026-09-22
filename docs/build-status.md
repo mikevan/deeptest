@@ -2,7 +2,7 @@
 
 Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
 
-Updated 2026-09-12 (1.0.9, in the tree). Companion to vscode-density-extension-spec.md.
+Updated 2026-09-22 (1.0.14, in the tree). Companion to vscode-density-extension-spec.md.
 Source tree and VSIX live at C:\workspace\MikeVan's AI Development Toolkit\DeepTest on Michael's machine. The
 authoritative copy of this file is docs/build-status.md in that tree.
 Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
@@ -16,6 +16,41 @@ and every extension is tagged 1.0.0 together (DeepTest, UntangleIt, the
 pack, and the library). From here the minor number moves once per language
 across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
 numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
+
+## 2026-09-22, 1.0.14: a card is never drawn from evidence with a hole in it
+
+- Every runner's records are counted against the runner's own test count
+  in `collect()` (`reconcile`, `Evidence` on `CoverageRun`). Fewer records
+  than finished tests, or any record whose boundary was cut, and the runner
+  refuses with "The check did not finish." and the reason
+  (`evidenceProblemSentence`), the three controls under it. Retries leave
+  more records than tests and are allowed. The Python plugin reports its
+  evidence as not reconcilable, since coverage.py contexts exist only where
+  a test touched a line.
+- Witness closes an open test on the next `begin` and at process exit with
+  the boundary named in the record (`overlapped`, `unterminated`) instead of
+  overwriting it or writing it as clean. A file a loader or the Vite plugin
+  could not instrument is noted beside the reports (`unmeasured-*.json`)
+  and shown as unmeasured, out of every number, verdict not ready.
+  `witnessUniverse` and `unloadedCoverages` keep an unreadable file the same
+  way rather than dropping it from the report.
+- `maps.skipped` reaches the person: per file in the full report, counted in
+  the summary. The Playwright fixture writes a record for a test whose page
+  had no runtime, so an empty test is not an unaccounted one.
+- The separator regression test in Witness constructs both spellings of a
+  path explicitly, so it can fail on Linux as well as Windows.
+- `scripts\survey.cjs` prints the evidence line and marks unmeasured files
+  and uncounted decisions, so the headless view says what the panel would.
+- Tests: Witness 9 (one new), DeepTest 207 (six new; 204 pass, 3 skipped
+  Python cases as before). UntangleIt and complexity untouched.
+- Verify on HelloWorlds\react-vitest: "Check my code" reports as it did at
+  1.0.13 and the log carries "Evidence: 11 tests finished, 11 attribution
+  records, 0 with a broken test boundary." Then, in a scratch copy of the
+  same project, change one `describe` to `describe.concurrent` and add a
+  short `await` in two of its tests: the panel must show "The check did not
+  finish." with "1 test was cut off before it ended, so what it reached
+  cannot be told apart from the next test. Nothing was scored." and no
+  numbers. Restore the copy.
 
 ## 2026-09-12, 1.0.9: Witness is its own library
 

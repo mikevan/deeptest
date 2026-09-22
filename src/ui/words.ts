@@ -10,7 +10,7 @@
  */
 import { FunctionComplexity, LineResult, Summary } from '../engine/types';
 import { DecisionState } from '../decisions/decisions';
-import { TestRunSummary } from '../languages/types';
+import { Evidence, TestRunSummary } from '../languages/types';
 
 export interface Voice {
   /** Append the technical form for people who want it. */
@@ -140,13 +140,24 @@ export function verdict(summary: Summary, tests: TestRunSummary, openCount: numb
   if (!summary.complexityOk) {
     thresholdMisses.push(`${plural(summary.complexFunctions.length, 'function')} ${summary.complexFunctions.length === 1 ? 'is' : 'are'} harder to test than your limit`);
   }
-  const belowBar = !summary.coverageOk || !summary.densityPassRateOk || !summary.averageDensityOk || !summary.complexityOk || failing > 0;
+  const unmeasured = summary.unmeasuredFiles.length;
+  if (unmeasured > 0) {
+    problems.push(`${plural(unmeasured, 'file')} could not be measured`);
+  }
+  const belowBar = !summary.coverageOk || !summary.densityPassRateOk || !summary.averageDensityOk || !summary.complexityOk || failing > 0 || unmeasured > 0;
   if (!belowBar) {
     const tail = openCount > 0 ? ` ${plural(openCount, 'line')} still ${openCount === 1 ? 'wants' : 'want'} more tests; your limits allow that.` : ' Every line has the tests it needs.';
     const acc = acceptedCount > 0 ? ` ${plural(acceptedCount, 'line')} accepted by a person.` : '';
     return { ready: true, headline: 'This looks ready.', detail: `It meets the limits you set.${tail}${acc}` };
   }
-  const headline = failing > 0 ? 'This is not ready: tests fail.' : summary.untestedLines > 0 ? `This is not ready: ${plural(summary.untestedLines, 'line')} ${summary.untestedLines === 1 ? 'was' : 'were'} never tested.` : 'This is not ready.';
+  const headline =
+    failing > 0
+      ? 'This is not ready: tests fail.'
+      : summary.untestedLines > 0
+        ? `This is not ready: ${plural(summary.untestedLines, 'line')} ${summary.untestedLines === 1 ? 'was' : 'were'} never tested.`
+        : unmeasured > 0
+          ? `This is not ready: ${plural(unmeasured, 'file')} could not be measured.`
+          : 'This is not ready.';
   const detail = [...problems, ...thresholdMisses].join('; ');
   return { ready: false, headline, detail: detail ? `${detail.charAt(0).toUpperCase()}${detail.slice(1)}.` : '' };
 }
@@ -268,6 +279,53 @@ export function nothingToScoreSentence(tests: TestRunSummary): string {
     return `No test ran, so there is nothing to score. ${tests.skipped === 1 ? 'The only test was' : `All ${tests.skipped} tests were`} skipped. ${see}`;
   }
   return `No test ran, so there is nothing to score. ${see}`;
+}
+
+/**
+ * Why a run whose attribution has a hole in it is refused, or undefined when
+ * the evidence holds. A test that finished and left no record means lines it
+ * ran are credited to nobody, and a card drawn from that would call them
+ * untested. A record with a broken boundary credits lines to a test that did
+ * not run them alone. Both are the check not finishing, in the architecture's
+ * sense: the reason is stated and the person gets the three controls.
+ */
+export function evidenceProblemSentence(evidence: Evidence): string | undefined {
+  const see = 'Press "Show the log" to see the test run.';
+  if (!evidence.reconcilable) {
+    return undefined;
+  }
+  if (evidence.brokenBoundaries > 0) {
+    return `${plural(evidence.brokenBoundaries, 'test')} ${evidence.brokenBoundaries === 1 ? 'was' : 'were'} cut off before ${evidence.brokenBoundaries === 1 ? 'it' : 'they'} ended, so what ${evidence.brokenBoundaries === 1 ? 'it' : 'they'} reached cannot be told apart from the next test. Nothing was scored. ${see}`;
+  }
+  if (evidence.testsRecorded < evidence.testsFinished) {
+    const missing = evidence.testsFinished - evidence.testsRecorded;
+    return `${plural(evidence.testsFinished, 'test')} finished but only ${evidence.testsRecorded} left a record of the lines ${evidence.testsRecorded === 1 ? 'it' : 'they'} reached, so ${plural(missing, 'test')} ${missing === 1 ? 'is' : 'are'} unaccounted for. Nothing was scored. ${see}`;
+  }
+  return undefined;
+}
+
+/** "3 files could not be measured." on the card, or an empty string. */
+export function unmeasuredSentence(summary: Summary): string {
+  const n = summary.unmeasuredFiles.length;
+  if (n === 0) {
+    return '';
+  }
+  return `${plural(n, 'file')} could not be measured, so ${n === 1 ? 'it is' : 'they are'} not in these numbers. ${n === 1 ? 'It is' : 'They are'} listed in the full report.`;
+}
+
+/** The line for one unmeasured file in the full report. */
+export function unmeasuredFileSentence(file: { path: string; reason: string }): string {
+  const reason = file.reason.trim().replace(/\.$/, '');
+  return `${file.path} could not be measured. ${reason.charAt(0).toUpperCase()}${reason.slice(1)}.`;
+}
+
+/** "2 decisions could not be counted." for a file, in the report, or an empty string. */
+export function skippedSentence(skipped: Array<{ line: number; reason: string }>): string {
+  if (skipped.length === 0) {
+    return '';
+  }
+  const lines = skipped.map((s) => s.line).join(', ');
+  return `${plural(skipped.length, 'decision')} on ${skipped.length === 1 ? 'line' : 'lines'} ${lines} could not be counted, so which way ${skipped.length === 1 ? 'it' : 'they'} went is unknown. The ${skipped.length === 1 ? 'line is' : 'lines are'} still counted as run or not run.`;
 }
 
 export function testsSentence(tests: TestRunSummary): string {

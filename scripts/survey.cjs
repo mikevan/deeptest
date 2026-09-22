@@ -20,6 +20,7 @@
 'use strict';
 const path = require('node:path');
 const { typescriptPlugin } = require('../out/src/languages/typescript/index.js');
+const words = require('../out/src/ui/words.js');
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -72,6 +73,11 @@ async function main() {
     process.exit(1);
   }
   console.log(`tests        ${run.tests.passed} passed, ${run.tests.failed} failed, ${run.tests.skipped} skipped, ${run.tests.errors || 0} errors`);
+  // The same check the panel makes before it draws a card (1.0.14): every
+  // finished test left a record, and no record was cut off.
+  const e = run.evidence || {};
+  const hole = words.evidenceProblemSentence(e);
+  console.log(`evidence     ${e.testsFinished} finished, ${e.testsRecorded} recorded, ${e.brokenBoundaries} cut off${e.reconcilable ? '' : ' (not reconcilable for this runner)'}${hole ? '   <- THE PANEL WOULD REFUSE: ' + hole : ''}`);
 
   const ids = new Set();
   for (const c of run.coverages) {
@@ -99,7 +105,7 @@ async function main() {
     const lines = c.lines.size;
     const attributed = [...c.lines.values()].filter((s) => s.size > 0).length;
     const covered = c.executed ? c.executed.size : 0;
-    const flag = lines > 0 && covered === 0 ? '   <- no test reached this file' : '';
+    const flag = c.unmeasured ? `   <- UNMEASURED: ${c.unmeasured}` : lines > 0 && covered === 0 ? '   <- no test reached this file' : c.skipped && c.skipped.length ? `   <- ${c.skipped.length} decision(s) not counted on line(s) ${c.skipped.map((k) => k.line).join(', ')}` : '';
     console.log(`${c.path.padEnd(40)} ${String(lines).padStart(5)}  ${String(covered).padStart(7)}  ${String(attributed).padStart(10)}${flag}`);
   }
 

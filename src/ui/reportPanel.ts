@@ -209,6 +209,14 @@ function html(m: ReportModel): string {
     })
     .join('')}</table>` : ''}
 
+  ${m.unmeasured.length ? `<h2>Files that could not be measured (${m.unmeasured.length})</h2><p>Nothing about these files is known: not which lines ran, not which tests ran them. They are left out of every number above rather than shown as untested.</p><ul>${m.unmeasured
+    .map((u) => `<li><a href="#" class="act" data-act="open" data-path="${esc(u.path)}" data-line="1">${esc(u.path)}</a>: ${esc(u.sentence)}</li>`)
+    .join('')}</ul>` : ''}
+
+  ${m.skipped.length ? `<h2>Decisions that could not be counted (${m.skipped.length} ${m.skipped.length === 1 ? 'file' : 'files'})</h2><ul>${m.skipped
+    .map((k) => `<li><a href="#" class="act" data-act="open" data-path="${esc(k.path)}" data-line="${k.line}">${esc(k.path)}</a>: ${esc(k.sentence)}</li>`)
+    .join('')}</ul>` : ''}
+
   ${m.unreachable.length ? `<h2>Code that can never run (${m.unreachable.length})</h2><p>These lines sit after a return, raise, break, or continue on every path. No test can reach them. The fix is to delete them.</p><ul>${m.unreachable
     .map((u) => `<li><a href="#" class="act" data-act="open" data-path="${esc(u.path)}" data-line="${u.line}">${esc(u.path)} line ${u.line}</a>: <code>${esc(u.code)}</code></li>`)
     .join('')}</ul>` : ''}

@@ -465,6 +465,17 @@ export class PythonCoverageSource implements CoverageSource {
     }
 
     const coverages = parseCoverageJson(fs.readFileSync(jsonFile, 'utf8')).filter((f) => !isTestFile(path.basename(f.path)));
-    return { coverages, tests, measuredFiles: coverages.map((c) => c.path) };
+    // coverage.py writes a context only where a test touched a measured line,
+    // so a test that touched none leaves nothing behind and the count of
+    // contexts cannot be held against the count of tests. Said so, not hidden.
+    const recorded = new Set<string>();
+    for (const file of coverages) {
+      for (const tests of file.lines.values()) {
+        for (const id of tests) {
+          recorded.add(id);
+        }
+      }
+    }
+    return { coverages, tests, measuredFiles: coverages.map((c) => c.path), evidence: { testsFinished: tests.passed + tests.failed, testsRecorded: recorded.size, brokenBoundaries: 0, reconcilable: false } };
   }
 }

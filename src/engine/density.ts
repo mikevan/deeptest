@@ -114,6 +114,13 @@ export function declarationLine(line: number, tests: Iterable<string>, executed:
 }
 
 export function analyzeFile(coverage: FileCoverage, structure: FileStructure | undefined): FileResult {
+  if (coverage.unmeasured !== undefined) {
+    // Nothing about this file is known. It gets no lines, no functions, and
+    // no place in any total: a file with zero executable lines would read as
+    // fully covered, and a file with every line untested would read as
+    // measured. Both are wrong. It is listed by name with the reason instead.
+    return { path: coverage.path, unmeasured: coverage.unmeasured, skipped: [], lines: [], functions: [], executableLines: 0, coveredLines: 0, scoredLines: 0, passingLines: 0, totalGap: 0, unreachableLines: [] };
+  }
   const depth = structure?.depth ?? new Map<number, number>();
   const routes = structure?.routes ?? new Map<number, RouteStep[]>();
   const unreachable = structure?.unreachable ?? new Set<number>();
@@ -161,6 +168,7 @@ export function analyzeFile(coverage: FileCoverage, structure: FileStructure | u
 
   return {
     path: coverage.path,
+    skipped: [...(coverage.skipped ?? [])].sort((a, b) => a.line - b.line),
     lines,
     functions: [...functions].sort((a, b) => a.startLine - b.startLine),
     executableLines: lines.length - unreachableLines.length,
@@ -214,9 +222,16 @@ export function summarize(files: FileResult[], thresholds: Thresholds = DEFAULT_
   let untestedLines = 0;
   let shortLines = 0;
   let ratioSum = 0;
+  let skippedDecisions = 0;
+  const unmeasuredFiles: Array<{ path: string; reason: string }> = [];
   const functions: Array<FunctionComplexity & { path: string }> = [];
 
   for (const file of files) {
+    if (file.unmeasured !== undefined) {
+      unmeasuredFiles.push({ path: file.path, reason: file.unmeasured });
+      continue;
+    }
+    skippedDecisions += file.skipped.length;
     executableLines += file.executableLines;
     coveredLines += file.coveredLines;
     scoredLines += file.scoredLines;
@@ -258,7 +273,7 @@ export function summarize(files: FileResult[], thresholds: Thresholds = DEFAULT_
   const densityPassRate = scoredLines === 0 ? 100 : round((passingLines / scoredLines) * 100);
 
   return {
-    files: files.length,
+    files: files.length - unmeasuredFiles.length,
     executableLines,
     coveredLines,
     coveragePercent,
@@ -277,6 +292,8 @@ export function summarize(files: FileResult[], thresholds: Thresholds = DEFAULT_
     declarationLines,
     untestedLines,
     shortLines,
+    unmeasuredFiles,
+    skippedDecisions,
     thresholds,
     coverageOk: coveragePercent >= thresholds.minCoverage,
     averageDensityOk: averageDensity >= thresholds.minAverageDensity,

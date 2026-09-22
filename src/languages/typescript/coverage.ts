@@ -29,7 +29,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { FileCoverage } from '../../engine/types';
 import { runProcess } from '../shared/process';
-import { CoverageRun, CoverageSource, EnvironmentCheck, LanguageSettings, RunContext, TestRunSummary } from '../types';
+import { CoverageRun, CoverageSource, EnvironmentCheck, Evidence, LanguageSettings, RunContext, TestRunSummary } from '../types';
 import { detectAngularKarmaConfig, detectAngularRunnerConfig, detectFramework } from './framework';
 import { createInstrumenter, hooksDir as witnessHooksDir, HOOK_FILES as WITNESS_HOOK_FILES, ENV as WITNESS_ENV, nodeSupportsWitness } from '@projectrevivesolutions/witness';
 
@@ -222,6 +222,34 @@ interface IstanbulFile {
   path: string;
   statementMap: Record<string, { start: { line: number; column: number }; end: { line: number; column: number } }>;
   s: Record<string, number>;
+  /** Witness adds this: decisions it chose not to count, line and reason. Istanbul reports have no such key. */
+  skipped?: Array<{ line: number; reason: string }>;
+}
+
+/** One per-test line as every hook writes it; `boundary` only when Witness had to cut the test off. */
+export interface AttributionRecord {
+  test: string;
+  files: Record<string, number[]>;
+  boundary?: 'overlapped' | 'unterminated';
+}
+
+/** The attribution lines parsed, blank and unreadable lines dropped. */
+export function parseAttribution(lines: string[]): AttributionRecord[] {
+  const out: AttributionRecord[] = [];
+  for (const raw of lines) {
+    if (!raw.trim()) {
+      continue;
+    }
+    try {
+      const entry = JSON.parse(raw) as AttributionRecord;
+      if (entry && typeof entry.test === 'string') {
+        out.push(entry);
+      }
+    } catch {
+      // a torn line from a process that died mid-write; the count will show it
+    }
+  }
+  return out;
 }
 
 /**
@@ -248,18 +276,10 @@ export function buildCoverages(workspaceRoot: string, coverageJson: string, attr
         executed.add(line);
       }
     }
-    byPath.set(relative, { path: relative, lines, executed });
+    const skipped = Array.isArray(file.skipped) && file.skipped.length > 0 ? file.skipped : undefined;
+    byPath.set(relative, skipped ? { path: relative, lines, executed, skipped } : { path: relative, lines, executed });
   }
-  for (const raw of attributionLines) {
-    if (!raw.trim()) {
-      continue;
-    }
-    let entry: { test: string; files: Record<string, number[]> };
-    try {
-      entry = JSON.parse(raw);
-    } catch {
-      continue;
-    }
+  for (const entry of parseAttribution(attributionLines)) {
     for (const [abs, executedLines] of Object.entries(entry.files ?? {})) {
       const file = byPath.get(rel(abs));
       if (!file) {
@@ -804,10 +824,27 @@ export class TypeScriptCoverageSource implements CoverageSource {
     for (const c of extra) {
       if (!seen.has(c.path)) {
         coverages.push(c);
+        seen.add(c.path);
+      }
+    }
+    // A file a loader could not instrument ran as written. It is in no
+    // report, so the universe walk above adds it as measured and never
+    // executed, which is the one reading that must not survive. Its entry is
+    // replaced by an unmeasured one carrying the reason.
+    for (const { path: file, reason } of readUnmeasured(coverageDir)) {
+      const relative = path.relative(ctx.workspaceRoot, file).split(path.sep).join('/');
+      const at = coverages.findIndex((c) => c.path === relative);
+      const entry: FileCoverage = { path: relative, lines: new Map(), executed: new Set(), unmeasured: reason };
+      if (at >= 0) {
+        coverages[at] = entry;
+      } else if (!relative.startsWith('..')) {
+        coverages.push(entry);
       }
     }
     coverages.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    return { coverages, tests, measuredFiles: coverages.map((c) => c.path) };
+    const evidence = reconcile(tests, parseAttribution(attribution));
+    ctx.log(`Evidence: ${evidence.testsFinished} tests finished, ${evidence.testsRecorded} attribution records, ${evidence.brokenBoundaries} with a broken test boundary.`);
+    return { coverages, tests, measuredFiles: coverages.map((c) => c.path), evidence };
   }
 
   /**
@@ -1057,7 +1094,9 @@ export function unloadedCoverages(workspaceRoot: string, relativePaths: string[]
       }
       out.push({ path: rel, lines, executed: new Set() });
     } catch (err) {
+      const reason = `Its executable lines could not be read: ${(err as Error).message.split('\n')[0]}`;
       log(`Could not read the executable lines of ${rel}: ${(err as Error).message.split('\n')[0]}`);
+      out.push({ path: rel, lines: new Map(), executed: new Set(), unmeasured: reason });
     }
   }
   return out;
@@ -1111,10 +1150,54 @@ export async function witnessUniverse(workspaceRoot: string, relativePaths: stri
       }
       out.push({ path: rel, lines, executed: new Set() });
     } catch (err) {
+      // Dropping the file here made it vanish from the report, which reads as
+      // "nothing wrong here". It is reported as unmeasured with the reason.
+      const reason = `Its executable lines could not be read: ${(err as Error).message.split('\n')[0]}`;
       log(`Could not read the executable lines of ${rel}: ${(err as Error).message.split('\n')[0]}`);
+      out.push({ path: rel, lines: new Map(), executed: new Set(), unmeasured: reason });
     }
   }
   return out;
+}
+
+/**
+ * The files Witness could not instrument, from every worker's and every Vite
+ * process's note beside the reports. Paths are absolute, forward slashes, as
+ * the loader and the plugin spell them.
+ */
+export function readUnmeasured(coverageDir: string): Array<{ path: string; reason: string }> {
+  if (!fs.existsSync(coverageDir)) {
+    return [];
+  }
+  const byPath = new Map<string, string>();
+  for (const file of fs.readdirSync(coverageDir).filter((f) => /^unmeasured-.*\.json$/.test(f))) {
+    try {
+      for (const entry of JSON.parse(fs.readFileSync(path.join(coverageDir, file), 'utf8')) as Array<{ path: string; reason: string }>) {
+        if (entry && typeof entry.path === 'string') {
+          byPath.set(entry.path, String(entry.reason ?? 'Witness could not instrument it.'));
+        }
+      }
+    } catch {
+      // a torn note; the file it named is at worst listed as measured, which the next run corrects
+    }
+  }
+  return Array.from(byPath, ([p, reason]) => ({ path: p, reason }));
+}
+
+/**
+ * The runner's count against the hooks' records. More records than tests is
+ * a retried test and is allowed; fewer is a test that left no record; a
+ * broken boundary is a record that credits lines to a test that did not run
+ * them alone. The runner decides what to do with the numbers; this only
+ * counts them.
+ */
+export function reconcile(tests: TestRunSummary, records: AttributionRecord[]): Evidence {
+  return {
+    testsFinished: tests.passed + tests.failed,
+    testsRecorded: records.length,
+    brokenBoundaries: records.filter((r) => r.boundary !== undefined).length,
+    reconcilable: true,
+  };
 }
 
 const PLAYWRIGHT_CT_PACKAGES = ['@playwright/experimental-ct-react', '@playwright/experimental-ct-vue', '@playwright/experimental-ct-svelte', '@playwright/experimental-ct-solid', '@playwright/experimental-ct-react17'];

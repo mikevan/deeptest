@@ -1363,3 +1363,59 @@ bundle goes to a cache folder under `.deeptest/`. The only files
 DeepTest writes are its own, under `.deeptest/`, rebuilt every check.
 The README, the setup notes, and docs/witness.md now say that in those
 words.
+
+## Evidence before verdict (1.0.14)
+
+Task 4 of the 2026-09-22 handoff: the tool refuses to show a verdict when
+the evidence behind it is missing. What was there before: the runner's test
+count decided whether a run was scored (`testsRan`, 0.4.5), and whatever
+attribution records existed were joined to the counters with no check that
+there was one per test. The Windows separator bug (1.0.7 to 1.0.11) shipped
+four versions of a card whose per-test attribution was empty, and nothing in
+the pipeline could have said so, because nothing compared what the runner
+said ran with what the hooks said they saw.
+
+Three holes, closed in this order because the third is the worst.
+
+1. Missing records. `collect()` now counts records against `passed + failed`
+   (`reconcile`, `Evidence`). Fewer is a hole and the runner refuses. More is
+   a retried test (Vitest `retry`, Playwright retries) and is allowed; the
+   count is logged either way. Skipped and errored tests never ran a hook, so
+   they are not expected to leave a record. Distinct ids were considered
+   and rejected as the count: two tests with the same full title in one file
+   are legal and would read as one missing record.
+2. Uncounted decisions and uninstrumented files. `maps.skipped` existed since
+   1.0.6 and was logged, which is silence to Jeff; it now rides on the
+   report entry and reaches the full report. A file the loader could not
+   instrument was worse: it ran as written, appeared in no report, and the
+   universe walk listed it as measured and never executed. The runtime keeps
+   a list (`witness.unmeasured()`), the loader and the Vite plugin feed it,
+   `readUnmeasured` reads it, and the engine gives such a file no lines, no
+   place in any total, and a reason on the card. The verdict is not ready
+   while one exists, because a project with an unmeasured file has a hole
+   whatever the other numbers say. The instrumenter itself never throws on
+   bad syntax (tree-sitter returns an error tree and the counters go in
+   anyway), so the loader's catch cannot be reached from a fixture; the
+   runtime, the reader, and the engine are unit-tested, and the loader's
+   three lines are read.
+3. The `currentTest` leak. `begin()` on an open test overwrote it. Under a
+   concurrent `describe` in Vitest the first test's lines were lost and the
+   second test's record held both tests' lines under one name; a suite whose
+   `afterEach` never ran had its last test written at exit as if it had ended.
+   Both are false evidence, not missing evidence. Now `begin()` closes the
+   open test with `boundary: "overlapped"`, the loader closes at exit with
+   `boundary: "unterminated"`, and one such record refuses the run. Proven
+   on a scratch copy of the Vitest fixture with `describe.concurrent`: the
+   headless survey prints the refusal where 1.0.13 printed a card.
+
+Rejected: teaching the runtime to keep a stack of open tests so concurrent
+tests could each get their own lines. The counters are per file, not per
+test, so a line hit while two tests are open belongs to both or to neither,
+and any split is a guess. Refusing is the honest answer; a project that
+wants per-test numbers turns concurrency off for the check.
+
+The Python path cannot be reconciled: coverage.py writes a context only where
+a test touched a measured line, so a test that touched none leaves nothing
+and the counts are not comparable. `Evidence.reconcilable` is false there and
+the runner does not pretend otherwise. Per-test proof on Python is the same
+job Witness did for JavaScript and is not in this slot.

@@ -20,6 +20,20 @@ export interface FileCoverage {
    * it shows up here and nowhere else.
    */
   executed: Set<number>;
+  /**
+   * Set when the file could not be measured at all: the instrumenter refused
+   * it, or its executable lines could not be read. `lines` and `executed`
+   * are then empty and mean nothing. A file like this is reported as
+   * unmeasured, never as measured and never executed, which is what it
+   * looked like before this field existed.
+   */
+  unmeasured?: string;
+  /**
+   * Decisions the instrumenter chose not to count, with the line and the
+   * reason. The statement on that line is still counted; the decision's
+   * outcomes are not. Surfaced so the gap is visible, never silent.
+   */
+  skipped?: Array<{ line: number; reason: string }>;
 }
 
 /** What kind of decision a route step is. Shared vocabulary across languages. */
@@ -147,6 +161,10 @@ export interface RouteProgress {
 
 export interface FileResult {
   path: string;
+  /** Why the file could not be measured, when it could not. Every count below is then zero. */
+  unmeasured?: string;
+  /** Decisions the instrumenter could not count, line and reason. */
+  skipped: Array<{ line: number; reason: string }>;
   lines: LineResult[];
   functions: FunctionComplexity[];
   /** Executable lines, declarations included, unreachable excluded. */
@@ -210,6 +228,10 @@ export interface Summary {
   declarationLines: number;
   untestedLines: number;
   shortLines: number;
+  /** Files that could not be measured, with the reason. Excluded from every count above. */
+  unmeasuredFiles: Array<{ path: string; reason: string }>;
+  /** Decisions the instrumenter could not count, across every file. */
+  skippedDecisions: number;
   thresholds: Thresholds;
   coverageOk: boolean;
   averageDensityOk: boolean;

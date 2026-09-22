@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, coverageIstanbulSpec, angularCliBin, parseKarmaSummary, unloadedCoverages, angularRunnerConfig } from '../src/languages/typescript/coverage';
+import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, coverageIstanbulSpec, angularCliBin, parseKarmaSummary, unloadedCoverages, angularRunnerConfig, reconcile, parseAttribution, readUnmeasured } from '../src/languages/typescript/coverage';
 import { typescriptPlugin } from '../src/languages/typescript';
 import { detectAngularBuilder, detectAngularKarmaConfig, detectAngularRunner, detectAngularRunnerConfig, detectFramework, frameworkSentence } from '../src/languages/typescript/framework';
 import { createRequire } from 'node:module';
@@ -111,6 +111,8 @@ async function endToEnd(fixture: string, expectedTestIds: string[], line25: 'dec
   const run = await source.run({ workspaceRoot: fixture, settings: settings('test', 'src'), log: (l) => log.push(l) });
   assert.equal(run.tests.passed, 3, log.join('\n'));
   assert.equal(run.tests.failed, 0);
+  // Every test that finished left its record, and none was cut off (1.0.14).
+  assert.deepEqual(run.evidence, { testsFinished: 3, testsRecorded: 3, brokenBoundaries: 0, reconcilable: true }, log.join('\n'));
   const calcPath = run.measuredFiles.find((f) => /src\/calc\.[jt]s$/.test(f));
   assert.ok(calcPath, `calc not measured: ${run.measuredFiles.join(', ')}`);
   const calc = run.coverages.find((c) => c.path === calcPath)!;
@@ -170,6 +172,42 @@ test('end to end with Vitest from a project outside the repository: the hook is 
   const hookDir = path.join(tmp, '.deeptest', 'hooks');
   assert.ok(log.some((l) => l === `Hook copied into ${hookDir}.`), `no copy line in the log:\n${log.join('\n')}`);
   assert.ok(log.some((l) => l.includes('--config') && l.includes(path.join(tmp, '.deeptest', 'vitest.config.mjs'))), 'the wrapper config lives in the project');
+});
+
+test('reconcile: the runner\'s count against the hooks\' records, and a broken boundary counted', () => {
+  const t = { passed: 3, failed: 1, errors: 0, skipped: 2, exitCode: 1 };
+  const rec = (test: string, boundary?: 'overlapped' | 'unterminated') => ({ test, files: {}, ...(boundary ? { boundary } : {}) });
+  assert.deepEqual(reconcile(t, [rec('a'), rec('b'), rec('c'), rec('d')]), { testsFinished: 4, testsRecorded: 4, brokenBoundaries: 0, reconcilable: true });
+  assert.deepEqual(reconcile(t, [rec('a'), rec('b')]), { testsFinished: 4, testsRecorded: 2, brokenBoundaries: 0, reconcilable: true }, 'skipped tests are not expected to leave a record; finished ones are');
+  assert.deepEqual(reconcile(t, [rec('a', 'overlapped'), rec('b'), rec('c'), rec('d', 'unterminated')]).brokenBoundaries, 2);
+  assert.deepEqual(parseAttribution(['', '{"test":"a","files":{}}', 'not json', '{"files":{}}', '{"test":"b","files":{},"boundary":"overlapped"}']).map((r) => `${r.test}:${r.boundary ?? 'clean'}`), ['a:clean', 'b:overlapped'], 'blank, torn, and testless lines are dropped');
+});
+
+test('readUnmeasured: the loader\'s and the plugin\'s notes beside the reports, one entry per file', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deeptest-unmeasured-'));
+  assert.deepEqual(readUnmeasured(path.join(dir, 'nowhere')), []);
+  fs.writeFileSync(path.join(dir, 'unmeasured-1-0.json'), JSON.stringify([{ path: '/p/a.ts', reason: 'first' }]));
+  fs.writeFileSync(path.join(dir, 'unmeasured-vite-9.json'), JSON.stringify([{ path: '/p/a.ts', reason: 'again' }, { path: '/p/b.ts', reason: 'other' }]));
+  fs.writeFileSync(path.join(dir, 'unmeasured-torn.json'), '[{"path": "/p/c.ts"');
+  fs.writeFileSync(path.join(dir, 'coverage-1-0.json'), '{}');
+  assert.deepEqual(readUnmeasured(dir).sort((a, b) => a.path.localeCompare(b.path)), [
+    { path: '/p/a.ts', reason: 'again' },
+    { path: '/p/b.ts', reason: 'other' },
+  ]);
+});
+
+test('buildCoverages carries what the instrumenter skipped, and nothing when it skipped nothing', () => {
+  const root = process.cwd();
+  const abs = path.join(root, 'src', 'x.ts');
+  const final = JSON.stringify({
+    [abs]: { path: abs, statementMap: { 0: { start: { line: 1, column: 0 }, end: { line: 1, column: 5 } } }, s: { 0: 1 }, skipped: [{ line: 4, reason: 'why' }] },
+    [path.join(root, 'src', 'y.ts')]: { path: path.join(root, 'src', 'y.ts'), statementMap: { 0: { start: { line: 2, column: 0 }, end: { line: 2, column: 5 } } }, s: { 0: 0 }, skipped: [] },
+  });
+  const out = buildCoverages(root, final, []);
+  assert.deepEqual(out.map((c) => [c.path, c.skipped]), [
+    ['src/x.ts', [{ line: 4, reason: 'why' }]],
+    ['src/y.ts', undefined],
+  ]);
 });
 
 test('the coverage package install is pinned to the project\'s Vitest major', () => {
@@ -280,7 +318,8 @@ test('files a Karma run never loaded get their executable lines from the source,
   const log: string[] = [];
   // DeepTest\'s own node_modules carries istanbul-lib-instrument (through @vitest/coverage-istanbul), so the repository root stands in for the project.
   const out = unloadedCoverages(process.cwd(), ['test/fixtures/helloworld-angular-karma/src/app/schedule.service.ts', 'test/fixtures/helloworld-angular-karma/src/main.ts', 'test/fixtures/helloworld-angular-karma/src/app/missing.ts'], (l) => log.push(l));
-  assert.equal(out.length, 2, log.join('\n'));
+  assert.equal(out.length, 3, log.join('\n'));
+  assert.match(out[2].unmeasured ?? '', /could not be read/, 'the unreadable file is kept and marked, not dropped (1.0.14)');
   const villain = out[0];
   assert.equal(villain.path, 'test/fixtures/helloworld-angular-karma/src/app/schedule.service.ts');
   const lines = Array.from(villain.lines.keys()).sort((a, b) => a - b);

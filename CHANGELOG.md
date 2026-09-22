@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.14
+
+A card is never drawn from evidence with a hole in it.
+
+The runner's own test count is now held against the attribution records the
+hooks wrote. A finished test that left no record, or a record whose test
+boundary was cut off, and the panel shows "The check did not finish." with
+the reason and the three controls, where 1.0.13 drew a card. The Windows
+separator bug shipped four versions of a card with empty per-test
+attribution, and nothing in the pipeline could have said so.
+
+A file the instrumenter could not take is shown as unmeasured, out of every
+number, with the reason, and the verdict is not ready while one exists;
+before, it read as measured and never executed. Decisions the instrumenter
+could not count are listed per file in the full report. `scripts\survey.cjs`
+prints the same evidence line the panel checks.
+
 ## 1.0.10
 
 The 1.x series is named Polyglot, and DeepTest carries it. The side panel header

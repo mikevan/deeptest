@@ -7,7 +7,7 @@
  * "Worst" is the engine's ranking: gap first, then bar. Nothing else.
  */
 import { DecidedFunction, DecidedLine, DecisionState } from '../decisions/decisions';
-import { functionDecisionSentence, threeNumbers } from '../ui/words';
+import { functionDecisionSentence, skippedSentence, threeNumbers, unmeasuredFileSentence } from '../ui/words';
 import { AnalysisResult, FunctionComplexity, RouteProgress, Summary } from '../engine/types';
 import { RunInfoLike } from './types';
 import { describeAction, describeMeaning, describeReach, describeRouteSteps } from './plain';
@@ -44,6 +44,10 @@ export interface ReportModel {
   /** Accepted by a person, with their reason. */
   accepted: ReportShortfall[];
   unreachable: Array<{ path: string; line: number; code: string }>;
+  /** Files that could not be measured, one sentence each with the reason. */
+  unmeasured: Array<{ path: string; sentence: string }>;
+  /** Files with decisions the instrumenter could not count, one sentence each. */
+  skipped: Array<{ path: string; line: number; sentence: string }>;
   /** Functions that carry a fix decision, as one sentence each. */
   functionDecisions: Array<{ path: string; startLine: number; sentence: string }>;
   detailCount: number;
@@ -106,6 +110,9 @@ export function verdictFor(summary: Summary, openCount: number, run: RunInfoLike
   if (!summary.complexityOk) {
     problems.push(`${summary.complexFunctions.length} function${summary.complexFunctions.length === 1 ? ' is' : 's are'} harder to test than your limit of ${summary.thresholds.maxFunctionComplexity} ways through`);
   }
+  if (summary.unmeasuredFiles.length > 0) {
+    problems.push(`${summary.unmeasuredFiles.length} file${summary.unmeasuredFiles.length === 1 ? '' : 's'} could not be measured`);
+  }
   if (problems.length === 0) {
     const tail = openCount > 0 ? ` ${openCount} line${openCount === 1 ? '' : 's'} still want${openCount === 1 ? 's' : ''} more tests; your limits allow that.` : ' Every line has the tests it needs.';
     return { ready: true, verdict: `It meets the limits you set.${tail}` };
@@ -139,6 +146,13 @@ export function buildReport(input: ReportInput): ReportModel {
       unreachable.push({ path: f.path, line, code: (readLine(f.path, line) ?? '').trim() });
     }
   }
+  const unmeasured = result.summary.unmeasuredFiles.map((f) => ({ path: f.path, sentence: unmeasuredFileSentence(f) }));
+  const skipped: ReportModel['skipped'] = [];
+  for (const f of result.files) {
+    if (f.skipped.length > 0) {
+      skipped.push({ path: f.path, line: f.skipped[0].line, sentence: skippedSentence(f.skipped) });
+    }
+  }
   const { ready, verdict } = verdictFor(result.summary, open.length, run);
   const t = run.tests;
   const testsLine = `${t.passed} passed${t.failed ? `, ${t.failed} failed` : ''}${t.errors ? `, ${t.errors} errors` : ''}${t.skipped ? `, ${t.skipped} skipped` : ''}`;
@@ -153,6 +167,8 @@ export function buildReport(input: ReportInput): ReportModel {
     rest: open.slice(detailCount),
     accepted,
     unreachable,
+    unmeasured,
+    skipped,
     functionDecisions,
     detailCount,
     compared: result.summary.measuredFunctions.slice(0, COMPARE_COUNT),
@@ -237,6 +253,24 @@ export function renderMarkdown(m: ReportModel): string {
     out.push('');
     for (const a of m.accepted) {
       out.push(`- ${a.path} line ${a.line} (${a.density} / ${a.bar}): ${stateText(a.state)}`);
+    }
+    out.push('');
+  }
+  if (m.unmeasured.length > 0) {
+    out.push(`## Files that could not be measured (${m.unmeasured.length})`);
+    out.push('');
+    out.push('Nothing about these files is known: not which lines ran, not which tests ran them. They are left out of every number above rather than shown as untested.');
+    out.push('');
+    for (const u of m.unmeasured) {
+      out.push(`- ${u.sentence}`);
+    }
+    out.push('');
+  }
+  if (m.skipped.length > 0) {
+    out.push(`## Decisions that could not be counted (${m.skipped.length} ${m.skipped.length === 1 ? 'file' : 'files'})`);
+    out.push('');
+    for (const k of m.skipped) {
+      out.push(`- ${k.path}: ${k.sentence}`);
     }
     out.push('');
   }

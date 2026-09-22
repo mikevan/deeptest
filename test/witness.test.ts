@@ -13,7 +13,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { repoWasmDir } from '../src/languages/shared/treeSitter';
-import { createInstrumenter, hooksDir as witnessHooksDir } from '@projectrevivesolutions/witness';
+import { createInstrumenter } from '@projectrevivesolutions/witness';
 import type { WitnessInstrumenter } from '@projectrevivesolutions/witness';
 import { nodeSupportsWitness, parseMochaSummary, detectRunner, witnessUniverse, detectPlaywrightCt, writePlaywrightFixture, playwrightComponentTests, playwrightWrapperConfig, parsePlaywrightSummary, mergePlaywrightRecords, mergeWitnessReports } from '../src/languages/typescript/coverage';
 
@@ -64,11 +64,16 @@ test('differential: the maps agree with istanbul-lib-instrument on every fixture
 test('files no test loads get their universe from the same instrumenter', async () => {
   const log: string[] = [];
   const out = await witnessUniverse(process.cwd(), ['test/fixtures/helloworld-react-jest/src/schedule.js', 'test/fixtures/helloworld-angular-karma/src/app/schedule.service.ts', 'test/fixtures/missing.ts'], wasmDir, (l) => log.push(l));
-  assert.equal(out.length, 2, log.join('\n'));
+  assert.equal(out.length, 3, log.join('\n'));
   assert.equal(Array.from(out[0].lines.keys()).sort((a, b) => a - b)[0], 13, 'the first if in pickGreeting');
   assert.ok(Array.from(out[1].lines.keys()).includes(13));
   assert.ok(Array.from(out[0].lines.values()).every((s) => s.size === 0));
   assert.match(log[0], /missing\.ts/);
+  // Until 1.0.14 the unreadable file was dropped, which made it vanish from
+  // the report as if there were nothing to say about it. It is kept, marked.
+  assert.equal(out[2].path, 'test/fixtures/missing.ts');
+  assert.match(out[2].unmeasured ?? '', /could not be read/);
+  assert.equal(out[2].lines.size, 0);
 });
 
 test('Mocha: the summary, the Node floor, and detection', () => {
