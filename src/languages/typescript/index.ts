@@ -10,7 +10,7 @@ import { DepthOptions, FileStructure } from '../../engine/types';
 import { runtimeEnvironment } from '../shared/runtime';
 import { createParser, initTreeSitter } from '../shared/treeSitter';
 import { CoverageSource, Detection, FieldSpec, HostServices, LanguagePlugin, StructureEnvironment, StructureSource } from '../types';
-import { TypeScriptCoverageSource, detectPlaywrightCt, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, readPackageJson, resolveModuleDir, walkSources } from './coverage';
+import { TypeScriptCoverageSource, detectPlaywrightCt, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, readPackageJson, walkSources } from './coverage';
 import { analyzeTypeScriptTree } from './structure';
 import { detectFramework, frameworkSentence } from './framework';
 import { extractScript, isSingleFileComponent } from '@projectrevivesolutions/complexity';
@@ -26,7 +26,7 @@ const FIELDS: FieldSpec[] = [
       { value: 'jest', label: 'Jest' },
       { value: 'mocha', label: 'Mocha' },
     ],
-    hint: 'Jest brings its own coverage. Vitest needs @vitest/coverage-istanbul; DeepTest offers to install it. Mocha needs nothing: DeepTest measures it through Witness on Node 22.15 or later.',
+    hint: 'Jest, Vitest and Mocha are all measured through Witness, DeepTest\'s own instrumentation. Nothing needs installing; Node 22.15 or later is required.',
   },
   {
     key: 'extraArgs',
@@ -50,12 +50,9 @@ async function detect(workspaceRoot: string, _host: HostServices): Promise<Detec
   } else if (framework?.name === 'Angular' && framework.angularBuilder === 'legacy-karma') {
     notes.push('This project tests through the older "@angular-devkit/build-angular:karma" builder, which DeepTest does not drive; "ng update" moves a project to "@angular/build:unit-test". Nothing needs installing.');
   } else if (framework?.name === 'Angular' && framework.angularRunner === 'karma') {
-    notes.push('Angular runs its tests through "ng test" with Karma. DeepTest drives that builder through a generated Karma config and runs the browser headless.');
+    notes.push('Angular runs its tests through "ng test" with Karma. DeepTest drives that builder through a generated Karma config and runs the browser headless. Nothing needs installing beyond what an Angular CLI project already has.');
   } else if (framework?.name === 'Angular' && framework.angularRunner === 'vitest') {
     notes.push('Angular runs its tests through "ng test". DeepTest drives that builder with the hook as a setup file.');
-    if (!resolveModuleDir(workspaceRoot, '@vitest/coverage-istanbul')) {
-      notes.push('@vitest/coverage-istanbul is not installed yet; DeepTest will offer to install it on the first run.');
-    }
   } else if (detectPlaywrightCt(workspaceRoot)) {
     const ct = detectPlaywrightCt(workspaceRoot)!;
     notes.push(`Found Playwright component tests (${ct.package}${ct.configFile ? `, configured in ${ct.configFile}` : ''}).`);
@@ -75,8 +72,8 @@ async function detect(workspaceRoot: string, _host: HostServices): Promise<Detec
     if (runner === 'mocha') {
       notes.push('Mocha is measured through Witness, DeepTest\'s own instrumentation, in ES modules and CommonJS alike. Nothing needs installing; Node 22.15 or later is required.');
     }
-    if (runner === 'vitest' && !resolveModuleDir(workspaceRoot, '@vitest/coverage-istanbul')) {
-      notes.push('@vitest/coverage-istanbul is not installed yet; DeepTest will offer to install it on the first run.');
+    if (runner === 'vitest') {
+      notes.push('Vitest is measured through Witness, DeepTest\'s own instrumentation. Nothing needs installing; Node 22.15 or later is required.');
     }
   } else {
     notes.push('No test runner found in package.json. Install Vitest or Jest, or pick one below.');
@@ -149,7 +146,7 @@ export const typescriptPlugin: LanguagePlugin = {
   isTestFile,
   detect,
   createCoverageSource(): CoverageSource {
-    return new TypeScriptCoverageSource({ hooksDir: runtimeEnvironment().hooksDir, wasmDir: runtimeEnvironment().wasmDir });
+    return new TypeScriptCoverageSource({ wasmDir: runtimeEnvironment().wasmDir });
   },
   async createStructureSource(env: StructureEnvironment): Promise<StructureSource> {
     await initTreeSitter(path.join(env.wasmDir, 'web-tree-sitter.wasm'));

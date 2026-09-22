@@ -5,6 +5,93 @@ Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
 What was tried, what failed, and why the code looks the way it does.
 Kept here so nobody re-learns it the hard way.
 
+## Angular is the only runner that type-checks what Witness emits (1.0.17)
+
+Two defects in the rewrite shipped for months and were invisible everywhere
+else. Jest, Vitest, Mocha, and Playwright transpile the instrumented source
+and never type-check it, so nothing they run can fail on a type. Angular's
+builder compiles the shadow tree with the project's own tsconfig, and a type
+error there stops the run.
+
+The first was erasure. The prologue declared the handle through a cast to
+`any`, because `globalThis.__witness__` is declared nowhere. `W.v` returns the
+value it was given, so `let name = W.v(0, "name", raw.trim())` stopped being a
+string, and `name.split(/\s+/).map((p) => ...)` then had a callback with no
+contextual type. Under `noImplicitAny` that is TS7006. It was found on
+HelloWorlds\angular-vitest and HelloWorlds\angular-karma at the same two
+lines of the same file, `src/app/names.ts` lines 14 and 29. Fixed by declaring
+the handle with an inline type whose wrappers are generic, so the type that
+goes in is the type that comes out.
+
+The second was narrowing, and it was worse. A counter wrapped around a
+condition makes it a function call, and TypeScript cannot narrow through a
+call. `if (W.b(0, p))` left `p` possibly undefined in the body, so every
+strict null check after it failed with TS18048, and `typeof value ===
+'string'` wrapped the same way lost the union refinement, which is TS2339 on
+both arms. A file of ordinary strict TypeScript produced six errors. No
+signature recovers narrowing, and no tsconfig setting hides it either: TS2339
+is not a strictness error, so turning `strict` off does not remove it.
+
+The fix was to stop wrapping conditions. An `if` counts inside each arm, with
+a synthetic `else` when it has none; a ternary counts inside each branch; a
+boolean run or a default value counts as the first operand of a comma
+expression, which does preserve narrowing. The condition is left exactly as
+written. istanbul-lib-instrument places its branch counters the same way,
+which is probably not a coincidence. `W.b` and `W.l` no longer exist and every
+way through a decision reports through `W.c`.
+
+One trap in the fix. The synthetic `else` cannot be an edit of its own. An
+enclosing block can end at the very same offset, and the edit ordering cannot
+tell which closing brace belongs to whom, so `if (a) { if (b) { x } }` came
+out as `}} else {}`, a syntax error. It is emitted as part of the consequent's
+own closing edit.
+
+The lasting answer is the test, not the fix: `test/witness.test.ts` compiles
+the rewrite with `tsc --strict` and fails if a type is erased or a narrowing
+is lost. Both defects reproduce against it when the old forms are put back.
+Without that test the next one of these would also wait for an Angular user to
+find it.
+
+## The Angular builder has no hook in front of its bundling (1.0.17)
+
+Three deliveries were spent on this. 1.0.12 put the Witness Vite plugin on the
+Angular Vitest path and it measured nothing, because the builder bundles the
+application before Vitest is involved and the plugin only ever saw built
+chunks outside the source root. 1.0.15 restored the 1.0.4 path, which
+instruments through the builder's own Istanbul and maps chunks back to sources
+through their source maps. 1.0.17 stops trying to get in front of the bundler
+from inside and instruments the files before the builder reads them.
+
+No schema in `@angular/build:unit-test` exposes a plugin hook, so there is
+nothing to find by looking harder. What it does expose is `--include`,
+`--ts-config`, `--setup-files` for Vitest, and `--runner-config` for both.
+Those four are enough to point it at a mirrored source tree, which is why the
+shadow tree is the answer rather than a workaround.
+
+Findings from the spike, each measured against a real Angular 22 project
+carrying a `templateUrl`, a `styleUrls`, an asset reached from the stylesheet,
+and a TypeScript path alias:
+
+1. NG8110. `input()`, `input.required()`, and `computed()` must appear
+   syntactically as the initialiser of a class member. A call wrapper is
+   refused, and so is a bare sequence expression, so no wrapping form
+   survives. A decorated class's field initialisers are left exactly as
+   written and recorded as skipped with the reason. The code inside them is
+   still instrumented, which is where the logic lives.
+2. The include must be relative. Karma's compatibility layer strips a leading
+   slash from every pattern before globbing, so an absolute include becomes a
+   relative one, matches nothing, and the run reports zero tests and passes.
+   A run that measures nothing but passes is the failure mode this toolkit
+   exists to remove, and it took two spike runs to see it.
+3. Aliases must follow the source into the mirror, or the aliased module is
+   the uninstrumented one and reads as never executed.
+4. Everything beside the source has to be copied, not skipped. Mirror only the
+   TypeScript and the template, the stylesheet, and the image all dangle.
+   Verified by negative control: pointing the stylesheet at a missing file
+   fails the build, so the reference is genuinely resolving through the mirror.
+5. `baseUrl` is deprecated in TypeScript 6 (TS5101), so the generated tsconfig
+   emits absolute alias targets and declares no `baseUrl` of its own.
+
 ## Per-test attribution for Python
 
 The spec flagged coverage.py's dynamic contexts as UNVERIFIED. Verified on

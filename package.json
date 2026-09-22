@@ -11,7 +11,7 @@
   ],
   "description": "Checks an AI's work. Runs your tests, then shows, in plain words, which lines of code no test ever reached and how many tests each line needs. You decide what to do about it.",
   "icon": "media/deeptestLogo.png",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "publisher": "prs",
   "license": "GPL-3.0-only",
   "repository": {
@@ -36,7 +36,7 @@
       "activitybar": [
         {
           "id": "deeptest",
-          "title": "DeepTest - Polyglot 1.0.16",
+          "title": "DeepTest - Polyglot 1.0.17",
           "icon": "media/deeptest.svg"
         }
       ]
@@ -46,9 +46,9 @@
         {
           "type": "webview",
           "id": "deeptest.sidebar",
-          "name": "DeepTest - Polyglot 1.0.16",
+          "name": "DeepTest - Polyglot 1.0.17",
           "icon": "media/deeptest.svg",
-          "contextualTitle": "DeepTest - Polyglot 1.0.16"
+          "contextualTitle": "DeepTest - Polyglot 1.0.17"
         }
       ]
     },
@@ -326,14 +326,13 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "web-tree-sitter": "0.27.0",
     "@projectrevivesolutions/complexity": "file:../complexity",
-    "@projectrevivesolutions/witness": "file:../Witness"
+    "@projectrevivesolutions/witness": "file:../Witness",
+    "web-tree-sitter": "0.27.0"
   },
   "devDependencies": {
     "@types/node": "^22.19.17",
     "@types/vscode": "^1.104.0",
-    "@vitest/coverage-istanbul": "^3.2.7",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "0.28.2",

@@ -3,11 +3,10 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, coverageIstanbulSpec, angularCliBin, parseKarmaSummary, unloadedCoverages, angularRunnerConfig, reconcile, parseAttribution, readUnmeasured, witnessTransform } from '../src/languages/typescript/coverage';
+import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, angularCliBin, parseKarmaSummary, angularKarmaConfig, readTsPaths, renameTestFiles, writeShadowTsConfig, reconcile, parseAttribution, readUnmeasured, witnessTransform } from '../src/languages/typescript/coverage';
 import { typescriptPlugin } from '../src/languages/typescript';
 import { detectAngularBuilder, detectAngularKarmaConfig, detectAngularRunner, detectAngularRunnerConfig, detectFramework, frameworkSentence } from '../src/languages/typescript/framework';
 import type { FileCoverage } from '../src/engine/types';
-import { createRequire } from 'node:module';
 import { guessLanguage } from '../src/detect/language';
 import { analyze } from '../src/engine/density';
 import { DEFAULT_DEPTH_OPTIONS } from '../src/engine/types';
@@ -95,7 +94,7 @@ test('plugin detect fills runner, tests folder, source root, and test files', as
 });
 
 test('discoverTests and checkEnvironment on the fixtures', async () => {
-  const source = new TypeScriptCoverageSource({ hooksDir: runtimeEnvironment().hooksDir });
+  const source = new TypeScriptCoverageSource({});
   assert.deepEqual(await source.discoverTests({ workspaceRoot: JEST_FIXTURE, settings: settings('test') }), ['test/calc.test.js']);
   assert.deepEqual(await source.discoverTests({ workspaceRoot: JEST_FIXTURE, settings: settings('src') }), []);
   const env = await source.checkEnvironment({ workspaceRoot: JEST_FIXTURE, settings: settings('test'), log: () => undefined });
@@ -239,12 +238,6 @@ test('buildCoverages carries what the instrumenter skipped, and nothing when it 
   ]);
 });
 
-test('the coverage package install is pinned to the project\'s Vitest major', () => {
-  assert.equal(coverageIstanbulSpec('4.1.11'), '@vitest/coverage-istanbul@4');
-  assert.equal(coverageIstanbulSpec('3.2.7'), '@vitest/coverage-istanbul@3');
-  assert.equal(coverageIstanbulSpec(''), '@vitest/coverage-istanbul');
-});
-
 // ---- 1.0.2: the framework is known; single-file components are visible ----
 
 const HW = (port: string) => path.join(process.cwd(), 'test', 'fixtures', `helloworld-${port}`);
@@ -286,7 +279,7 @@ test('plugin detect puts the framework first in the notes, and says ng test for 
 });
 
 test('checkEnvironment on an Angular project: both flavours want the CLI installed first, and the older Karma builder is refused (1.0.5)', async () => {
-  const source = new TypeScriptCoverageSource({ hooksDir: runtimeEnvironment().hooksDir });
+  const source = new TypeScriptCoverageSource({});
   // The fixtures carry no node_modules, so both builder paths stop at the CLI and ask for npm install, never for Vitest.
   for (const [port, runner] of [['angular-karma', 'Karma'], ['angular-vitest', 'Vitest']] as const) {
     const env = await source.checkEnvironment({ workspaceRoot: HW(port), settings: settings('src'), log: () => undefined });
@@ -343,23 +336,6 @@ test('the Karma config Angular would load: named, the project karma.conf.js, or 
   assert.equal(detectAngularKarmaConfig(dir), 'karma.conf.js', 'the older builder names it karmaConfig');
 });
 
-test('files a Karma run never loaded get their executable lines from the source, all untested', () => {
-  const log: string[] = [];
-  // DeepTest\'s own node_modules carries istanbul-lib-instrument (through @vitest/coverage-istanbul), so the repository root stands in for the project.
-  const out = unloadedCoverages(process.cwd(), ['test/fixtures/helloworld-angular-karma/src/app/schedule.service.ts', 'test/fixtures/helloworld-angular-karma/src/main.ts', 'test/fixtures/helloworld-angular-karma/src/app/missing.ts'], (l) => log.push(l));
-  assert.equal(out.length, 3, log.join('\n'));
-  assert.match(out[2].unmeasured ?? '', /could not be read/, 'the unreadable file is kept and marked, not dropped (1.0.14)');
-  const villain = out[0];
-  assert.equal(villain.path, 'test/fixtures/helloworld-angular-karma/src/app/schedule.service.ts');
-  const lines = Array.from(villain.lines.keys()).sort((a, b) => a - b);
-  assert.equal(lines[0], 13, 'the first if inside pickGreeting; the decorator and class field above it are not statements in the source');
-  assert.ok(lines.length > 40, `${lines.length} executable lines`);
-  assert.ok(Array.from(villain.lines.values()).every((tests) => tests.size === 0), 'no test on any of them');
-  assert.equal(villain.executed.size, 0);
-  assert.deepEqual(Array.from(out[1].lines.keys()), [5, 6]);
-  assert.match(log[0], /Could not read the executable lines of .*missing\.ts/);
-});
-
 test('the runner config Angular would load: named in angular.json, the default file, or none', () => {
   assert.equal(detectAngularRunnerConfig(HW('angular-vitest')), undefined, 'the fixture has no runner config');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deeptest-ng-'));
@@ -380,27 +356,6 @@ test('the runner config Angular would load: named in angular.json, the default f
   assert.equal(detectAngularRunnerConfig(dir), undefined, 'a named file that does not exist is not imported');
 });
 
-test('the hook maps a bundled chunk\'s counters back to the source file through the chunk\'s source map (1.0.4)', () => {
-  const hook = createRequire(__filename)(path.join(process.cwd(), 'hooks', 'attribution.cjs')) as {
-    originalPosition: (fileCov: unknown, file: string, line: number, column: number) => { file: string; line: number } | undefined;
-    decodeMappings: (m: string) => number[][][];
-  };
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deeptest-map-'));
-  fs.mkdirSync(path.join(dir, 'src'));
-  fs.writeFileSync(path.join(dir, 'src', 'a.ts'), 'x\ny\n');
-  // Three generated lines: [0,0,0,0] -> a.ts line 1; [0,0,+1,0] -> a.ts line 2; [0,+1,0,0] -> the builder's virtual module.
-  const map = { sources: ['src/a.ts', 'virtual:builder'], mappings: 'AAAA;AACA;ACAA' };
-  assert.deepEqual(hook.decodeMappings(map.mappings), [[[0, 0, 0]], [[0, 1, 0]], [[0, 1, 1]]]);
-  const chunk = path.join(dir, 'chunk-ABC123.js');
-  assert.equal(fs.existsSync(chunk), false, 'the chunk exists nowhere on disk');
-  assert.deepEqual(hook.originalPosition({ inputSourceMap: map }, chunk, 1, 0), { file: path.join(dir, 'src', 'a.ts'), line: 1 });
-  assert.deepEqual(hook.originalPosition({ inputSourceMap: map }, chunk, 2, 0), { file: path.join(dir, 'src', 'a.ts'), line: 2 });
-  assert.equal(hook.originalPosition({ inputSourceMap: map }, chunk, 3, 0), undefined, 'a virtual module is nobody\'s line');
-  // A file that is on disk keeps its key and only moves the line (Vite's own transform).
-  const onDisk = path.join(dir, 'src', 'a.ts');
-  assert.deepEqual(hook.originalPosition({ inputSourceMap: { sources: ['a.ts'], mappings: 'AAAA;AACA' } }, onDisk, 2, 0), { file: onDisk, line: 2 });
-  assert.deepEqual(hook.originalPosition({}, onDisk, 5, 0), { file: onDisk, line: 5 }, 'no map, no change');
-});
 
 test('.vue and .svelte files are walked as sources and are in the plugin\'s extensions', () => {
   const vue = walkSources(HW('vue-vitest'));
@@ -459,29 +414,98 @@ test('a single-file component is parsed through its script block on its real lin
 });
 
 /**
- * The Angular drivers have no end-to-end test: running one would mean carrying
- * the whole Angular toolchain in DeepTest's devDependencies. This pins what the
- * builder is handed instead, so a refactor cannot quietly drop the Witness
- * plugin or put the coverage provider back, which is how this path would go
- * falsely clean without anything failing.
+ * The Angular drivers have no end-to-end test in this suite: running one
+ * would mean carrying the whole Angular toolchain in DeepTest's
+ * devDependencies. The proof that the path measures anything is the spike
+ * that built it, run against a real Angular project with a templateUrl, a
+ * styleUrls, an asset reached from the stylesheet and a TypeScript path
+ * alias, under both runners; what is pinned here is the part a refactor
+ * could quietly change.
+ *
+ * That distinction is not academic. The version of this test that stood from
+ * 1.0.12 to 1.0.14 asserted that the generated Vitest config carried the
+ * Witness plugin and no coverage provider, and it passed on every run while
+ * that path measured nothing whatsoever: it pinned the string we meant to
+ * generate, which was exactly the string we generated. A generated-string
+ * test cannot prove a path measures anything, so none of these claim to.
  */
-test('the Angular runner config pins the istanbul provider and the reports directory', () => {
-  // The version of this test that stood from 1.0.12 to 1.0.14 asserted that
-  // the generated config carried the Witness plugin and no coverage provider,
-  // and it passed on every run while that path measured nothing whatsoever.
-  // It pinned the string we meant to generate, which was exactly the string we
-  // generated; what it could not see is that the builder bundles before Vitest
-  // runs, so the plugin was handed built chunks and declined all of them. A
-  // generated-string test cannot prove a path measures anything. The guard
-  // against a silent false-clean is the run refusing when it measured nothing
-  // (evidenceProblemSentence), not this test.
-  const withProject = angularRunnerConfig({ userConfigImport: './../vitest.config.ts', coverageDir: 'C:\\p\\.deeptest\\coverage' });
-  assert.match(withProject, /import base from "\.\/\.\.\/vitest\.config\.ts";/, "the project's own runner config is still wrapped");
-  assert.match(withProject, /provider: 'istanbul'/, 'the builder picks v8 otherwise, and v8 keeps no live counters to snapshot per test');
-  assert.match(withProject, /reportsDirectory: "C:\\\\p\\\\\.deeptest\\\\coverage"/, 'the report lands where the driver reads it, and the path survives JSON escaping on Windows');
-  assert.doesNotMatch(withProject, /witnessPlugin/, 'Witness does not instrument this path; the builder does, and the hook maps its chunks back');
+test('the generated Karma config wraps the project\'s own, adds Witness, and keeps the browser headless', () => {
+  const generated = angularKarmaConfig({ workspaceRoot: path.join('p'), hookDir: path.join('p', '.deeptest', 'hooks'), userConfig: 'karma.conf.js' });
+  assert.match(generated, /require\("p\/karma\.conf\.js"\)\(config\);/, "the project's own config is applied first, so its settings are the ones being added to");
+  assert.doesNotMatch(generated, /basePath/, 'and the builder\'s defaults are not also set: giving it a config is what takes them away, applying both would fight');
+  assert.match(generated, /require\("p\/\.deeptest\/hooks\/witness-karma\.cjs"\)/, 'the plugin, by absolute path, because Karma resolves plugins from its own folder');
+  // Asserted line by line. The first version of this checked only that
+  // "concat(['witness'])" appeared somewhere, and a mutation that dropped the
+  // framework entirely left the reporter's own concat to satisfy it: the
+  // runtime would never be served, nothing would be measured, and this test
+  // would still have passed.
+  assert.match(generated, /frameworks: \(config\.frameworks \|\| \['jasmine'\]\)\.concat\(\['witness'\]\),/, 'the framework serves the runtime ahead of the bundle');
+  assert.match(generated, /\.concat\(\['witness'\]\),\n    browsers:/, 'and the reporter writes what the browser sends back');
+  assert.match(generated, /filter\(\(r\) => r !== 'kjhtml'\)/, 'kjhtml holds the browser open waiting for a person, and nobody is there');
+  assert.match(generated, /b === 'Chrome' \? 'ChromeHeadless' : b/);
+  assert.doesNotMatch(generated, /coverageReporter|karma-coverage/, 'Witness instruments before the builder bundles, so Karma\'s own coverage is not involved');
 
-  const noProject = angularRunnerConfig({ coverageDir: 'c' });
-  assert.match(noProject, /const base = \{\};/, 'a project with no runner config still gets a valid wrapper');
-  assert.doesNotMatch(noProject, /import base/);
+  const bare = angularKarmaConfig({ workspaceRoot: '/p', hookDir: '/p/.deeptest/hooks' });
+  assert.match(bare, /frameworks: \['jasmine'\],/, 'with no config of its own the project gets the defaults the builder would have applied');
+  assert.match(bare, /plugins: \['karma-jasmine', 'karma-chrome-launcher'\]\.map\(\(p\) => projectRequire\(p\)\),/, "resolved from the project, not from DeepTest's own node_modules");
+  assert.doesNotMatch(bare, /karma\.conf\.js/);
 });
+
+/**
+ * The shadow tree runs the copy, so every runner names the copy. The lines in
+ * the record already name the original, because the maps carry the original
+ * path; without this the card would show test names pointing into a
+ * generated folder beside lines pointing into the project.
+ */
+test('a test id names the spec the person wrote, not the copy that ran', () => {
+  const lines = [
+    JSON.stringify({ test: '.deeptest/instrumented/app/greeting.spec.ts::Greeting > renders', files: { '/p/src/app/greeting.ts': [14] } }),
+    JSON.stringify({ test: 'src/app/other.spec.ts::elsewhere', files: {} }),
+    '',
+    'not json at all',
+  ];
+  const out = renameTestFiles(lines, '.deeptest/instrumented/', 'src/');
+  assert.equal((JSON.parse(out[0]) as { test: string }).test, 'src/app/greeting.spec.ts::Greeting > renders');
+  assert.deepEqual((JSON.parse(out[0]) as { files: unknown }).files, { '/p/src/app/greeting.ts': [14] }, 'only the leading folder moves; the lines were already right');
+  assert.equal(out[1], lines[1], 'an id that does not start with the mirror is left exactly as it was');
+  assert.equal(out[2], '');
+  assert.equal(out[3], 'not json at all', 'a torn line is passed through rather than dropped');
+  assert.deepEqual(renameTestFiles(lines, '.deeptest/instrumented/', ''), [JSON.stringify({ test: 'app/greeting.spec.ts::Greeting > renders', files: { '/p/src/app/greeting.ts': [14] } }), lines[1], '', 'not json at all'], 'a project whose source root is the project root gets no prefix put back');
+});
+
+/**
+ * An alias left pointing at the real source root is the quiet failure this
+ * guards: the build succeeds, the aliased module is the uninstrumented one,
+ * and every line in it reads as never executed. The spike's `@util/*` case
+ * exists for exactly this, and it is the one file in that project reachable
+ * only through an alias.
+ */
+test('the shadow tsconfig repoints aliases into the mirror, and leaves the ones that point elsewhere', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deeptest-shadow-'));
+  const src = path.join(dir, 'src');
+  fs.mkdirSync(src, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'tsconfig.json'),
+    ['{', '  // a comment, because tsc --init writes them and every Angular project has them', '  "compilerOptions": {', '    "paths": {', '      "@util/*": ["./src/util/*"],', '      "@shared/*": ["./libs/shared/*"],', '    },', '  },', '}'].join('\n'),
+  );
+  fs.writeFileSync(path.join(dir, 'tsconfig.spec.json'), JSON.stringify({ extends: './tsconfig.json', compilerOptions: { types: ['jasmine'] } }));
+  const workDir = path.join(dir, '.deeptest');
+  const instrumented = path.join(workDir, 'instrumented');
+
+  const paths = readTsPaths(path.join(dir, 'tsconfig.spec.json')).paths;
+  assert.deepEqual(paths['@util/*'], [path.join(dir, 'src', 'util', '*').split(path.sep).join('/')], 'inherited through extends, resolved against the config that declared it');
+
+  const generated = writeShadowTsConfig(workDir, path.join(dir, 'tsconfig.spec.json'), src, instrumented);
+  const config = JSON.parse(fs.readFileSync(generated, 'utf8')) as { extends: string; compilerOptions: { paths: Record<string, string[]> }; include: string[] };
+  assert.equal(config.extends, '../tsconfig.spec.json', "the project's own test tsconfig, so its types and strictness are the ones in force");
+  assert.deepEqual(config.compilerOptions.paths['@util/*'], [path.join(instrumented, 'util', '*').split(path.sep).join('/')], 'inside the source root, so it follows the source into the mirror');
+  assert.deepEqual(config.compilerOptions.paths['@shared/*'], [path.join(dir, 'libs', 'shared', '*').split(path.sep).join('/')], 'outside it, so it is left alone, absolute so it does not depend on where this file sits');
+  assert.deepEqual(config.include, ['./instrumented/**/*.ts', './instrumented/**/*.tsx'], 'the mirror is what is compiled; the base\'s own include is discarded by having one here at all');
+
+  const none = JSON.parse(fs.readFileSync(writeShadowTsConfig(workDir, path.join(dir, 'tsconfig.json'), src, path.join(workDir, 'i2')), 'utf8')) as { compilerOptions?: unknown };
+  assert.ok(none.compilerOptions, 'a config that declares paths directly is read the same way');
+  const bare = path.join(dir, 'bare.json');
+  fs.writeFileSync(bare, '{}');
+  assert.equal((JSON.parse(fs.readFileSync(writeShadowTsConfig(workDir, bare, src, instrumented), 'utf8')) as { compilerOptions?: unknown }).compilerOptions, undefined, 'a project with no aliases gets no paths block invented for it');
+});
+

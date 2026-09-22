@@ -1,5 +1,55 @@
 # Changelog
 
+## 1.0.17
+
+Angular measures through Witness, under both runners, and Istanbul is gone
+from the product.
+
+The builder bundles the application before either Vitest or Karma runs, and
+no schema in it exposes a hook in front of that. So the source is instrumented
+before the builder reads it. The source root is mirrored into
+`.deeptest/instrumented`: source files instrumented, and everything else,
+specs, templates, stylesheets, and assets, copied through so the relative
+references a component makes still resolve. The builder is pointed at the
+mirror with `--include` and a generated tsconfig that extends the project's
+own and repoints any path alias whose target is inside the source root. An
+alias left pointing at the real source would quietly pull in the
+uninstrumented file, and every line in it would read as never executed.
+
+The counters are in the bundle before the builder touches it, and they carry
+the original path and the original line, so nothing is mapped back out of a
+chunk afterwards. That mapping layer, and the coverage provider it needed, are
+deleted. Karma ignores `--setup-files`, so its runtime and test boundary go in
+through a generated Karma config that wraps the project's own and adds a
+Witness framework and reporter.
+
+Out with them: `@vitest/coverage-istanbul` and `karma-coverage` as
+requirements, the chunk-to-source mapper, the unloaded-file universe that
+needed the project's `istanbul-lib-instrument`, and all five hooks DeepTest
+used to ship. DeepTest now ships no hooks of its own. Every hook comes from
+the Witness package, and no runner asks a project to install anything for
+coverage.
+
+Packaging caught up in the same pass. `.refactorit` was still tracked, eleven
+days after the tool was renamed to UntangleIt, and is removed; DeepTest
+ignores `.refactorit/**` in both the repository and the package, UntangleIt
+excludes `.deeptest/**` from its package, and DeepTest's package no longer
+excludes a `hooks/**` folder it does not have.
+
+The include pattern is written relative to Angular's own project source root
+and never as an absolute path. The Karma compatibility layer strips a leading
+slash from every pattern before globbing it, which turns an absolute pattern
+into a relative one that matches nothing, and the run then reports zero tests
+and passes.
+
+Measured on the angular-vitest and angular-karma ports, at Node v22.23.2:
+eleven tests, eleven records, eleven carrying a file, three files with a line
+that ran, none cut off, test ids naming the spec the person wrote. The two
+runners agree file for file on every count, including the two lines in the
+component that Angular requires to appear exactly as written and that the
+report names rather than hides. The figures describe the source now, not the
+builder's compiled output, so they differ from the 1.0.15 baseline by design.
+
 ## 1.0.16
 
 Jest measures through Witness, so nothing in a Jest project installs a

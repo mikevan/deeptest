@@ -2,7 +2,7 @@
 
 Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
 
-Updated 2026-09-22 (1.0.16, in the tree). Companion to vscode-density-extension-spec.md.
+Updated 2026-09-22 (1.0.17, in the tree). Companion to vscode-density-extension-spec.md.
 Source tree and VSIX live at C:\workspace\MikeVan's AI Development Toolkit\DeepTest on Michael's machine. The
 authoritative copy of this file is docs/build-status.md in that tree.
 Committed on main: cc9d908 "Cognitive complexity beside cyclomatic" (0.3.7),
@@ -16,6 +16,80 @@ and every extension is tagged 1.0.0 together (DeepTest, UntangleIt, the
 pack, and the library). From here the minor number moves once per language
 across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
 numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
+
+## 2026-09-22, 1.0.17: Angular measures through Witness, and Istanbul leaves the product
+
+- `writeShadowTree` mirrors the source root into `.deeptest/instrumented`:
+  every source file instrumented with its maps embedded and labelled with the
+  ORIGINAL path, everything else copied through. The copying is not an extra:
+  a component names its template and stylesheet by relative path and a
+  stylesheet names an image the same way, and each is resolved from the file
+  that names it. A negative control proved the resolution is real. Pointing
+  the stylesheet at a missing asset fails the build.
+- `writeShadowTsConfig` extends the project's own test tsconfig, in the
+  builder's own order of preference, and repoints every path alias whose
+  target is inside the source root. An alias left alone pulls the
+  uninstrumented file into the build, and every line in it then reads as never
+  executed. `readTsPaths` follows `extends` and resolves each target the way
+  TypeScript does, from a tsconfig that may carry comments and trailing
+  commas.
+- `detectAngularTestTarget` reads the project's source root, because the
+  builder globs every `--include` pattern with that folder as the working
+  directory. The include is therefore relative and never absolute: the Karma
+  compatibility layer strips a leading slash from each pattern before globbing
+  (`builders/karma/find-tests.js`), so an absolute pattern becomes a relative
+  one, matches nothing, and the run reports zero tests and passes. That is how
+  the first spike run failed.
+- `renameTestFiles` moves the spec path in each test id from the mirror back
+  to the source. The lines in the record were already right; without this the
+  card would have shown test names pointing into a generated folder beside
+  lines pointing into the project.
+- Karma goes in through `angularKarmaConfig` and `--runner-config`, because
+  the builder ignores `setupFiles` for that runner and says so in a warning.
+  The generated config wraps the project's own when it has one and otherwise
+  sets the defaults the builder would have applied itself, then adds the
+  Witness framework and reporter, drops `kjhtml`, and turns a bare `Chrome`
+  into `ChromeHeadless`.
+- Removed: `unloadedCoverages`, `coverageIstanbulSpec`, `angularRunnerConfig`,
+  the `@vitest/coverage-istanbul` and `karma-coverage` environment
+  requirements, the `@vitest/coverage-istanbul` devDependency in both DeepTest
+  and UntangleIt, and all five hooks DeepTest shipped (`attribution.cjs`,
+  `jest.cjs`, `karma.cjs`, `karma-client.js`, `vitest.mjs`). DeepTest now ships
+  no hooks of its own and `hooksDir` is gone from the runtime environment.
+  `istanbul-lib-instrument` stays as a devDependency only, because it is the
+  oracle the differential test grades the maps against.
+- `esbuild.mjs` empties `dist/hooks` before filling it. Two files that had
+  stopped being hooks had already shipped from an earlier build.
+- Packaging, carried in the same delivery: `.refactorit` removed from the
+  repository eleven days after the rename to UntangleIt, `.refactorit/**`
+  ignored in DeepTest's `.gitignore` and `.vscodeignore`, `.deeptest/**`
+  excluded from UntangleIt's package, and `hooks/**` dropped from DeepTest's
+  `.vscodeignore` now that the folder is gone.
+- Tests: 218 in DeepTest (four obsolete ones removed with the mechanism they
+  described, three added: the generated Karma config, the shadow tsconfig and
+  its aliases, the shadow tree itself, and the test-id rename), 12 in Witness
+  (two added: the decorated class through the embedded maps, and the rewrite
+  under `tsc --strict`).
+- Verified on Michael's machine at Node v22.23.2, 2026-09-22. Witness 12
+  passed, DeepTest 218 passed and 0 skipped. `survey.cjs` on
+  HelloWorlds\angular-vitest and HelloWorlds\angular-karma: 11 finished, 11
+  recorded, 11 carrying a file, 3 files with a line that ran, 0 cut off, test
+  ids naming `src/app/*.spec.ts`. Both runners report the same table:
+  `src/app/greet.ts` 9/9, `src/app/greeting.ts` 1/1 with 2 decisions uncounted
+  on lines 10 and 11, `src/app/names.ts` 18 lines with 8 covered,
+  `src/app/app.config.ts` 1 line at zero, `src/app/app.ts` no executable
+  lines, `src/app/schedule.service.ts` 49 lines at zero, `src/main.ts` 2 lines
+  at zero. Eighteen covered of eighty executable.
+- Those figures differ from 1.0.15's 21 attributed lines and 25.61 percent,
+  and that is the point of the delivery. Istanbul counted the builder's
+  compiled output, where a decorated class field lowers into statements.
+  Witness counts the source, and names the two initialisers in `greeting.ts`
+  that Angular requires to appear exactly as written rather than counting
+  them. The full line-by-line reconciliation against the 1.0.15 table has not
+  been done.
+- Verify: those two survey runs. They are the pair that matters, because the
+  two ports hold identical TypeScript and differ only in their runner, so any
+  disagreement between the tables is a defect and not a difference of opinion.
 
 ## 2026-09-22, 1.0.16: Jest measures through Witness
 

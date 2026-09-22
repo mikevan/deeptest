@@ -133,7 +133,7 @@ test('checkEnvironment refuses when the runner itself will not start on this Nod
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'p', devDependencies: { vitest: '^3.2.0' }, scripts: { test: 'vitest run' } }));
   const vitestDir = path.join(dir, 'node_modules', 'vitest');
   fs.mkdirSync(vitestDir, { recursive: true });
-  const source = new TypeScriptCoverageSource({ hooksDir: path.resolve('hooks'), wasmDir: path.resolve('dist') });
+  const source = new TypeScriptCoverageSource({ wasmDir: path.resolve('dist') });
   const ctx = { workspaceRoot: dir, settings: { testsPath: 'test', sourceRoot: 'src', fields: { runner: 'auto', extraArgs: '' } }, log: () => undefined };
 
   fs.writeFileSync(path.join(vitestDir, 'package.json'), JSON.stringify({ name: 'vitest', version: '3.2.7' }));

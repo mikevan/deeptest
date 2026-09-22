@@ -2,7 +2,7 @@
 // beside it. web-tree-sitter locates its runtime wasm at load time, so the
 // extension passes an absolute path (see src/engine/depth/treeSitter.ts).
 import * as esbuild from 'esbuild';
-import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 // web-tree-sitter ships ESM and CJS builds. Its ESM build uses import.meta.url,
 // which is undefined inside a CommonJS bundle, so point the bundler at the CJS
@@ -44,14 +44,16 @@ const watch = process.argv.includes('--watch');
 
 mkdirSync('dist', { recursive: true });
 copyFileSync('node_modules/web-tree-sitter/web-tree-sitter.wasm', 'dist/web-tree-sitter.wasm');
+// Emptied first, not just written into. Twice now a file that stopped being
+// a hook has stayed in dist/hooks from an earlier build and shipped in the
+// package, where nothing references it and nobody would notice.
+rmSync('dist/hooks', { recursive: true, force: true });
 mkdirSync('dist/hooks', { recursive: true });
-for (const file of readdirSync('hooks')) {
-  copyFileSync(`hooks/${file}`, `dist/hooks/${file}`);
-}
-// The Witness hooks (runtime, loaders, Vite plugin, Playwright hook and
-// fixture, Mocha boundary, and the bundled instrumenter) come from the
-// library and ship beside DeepTest's own hooks. The library's index is
-// bundled into extension.js, so its hooksDir() is dist/hooks at runtime.
+// Every hook ships from the Witness package: the runtime, the loaders, the
+// Vite plugin, the Jest transformer, the Karma plugin and its client, the
+// Playwright hook and fixture, the Mocha boundary, and the bundled
+// instrumenter. DeepTest has none of its own since 1.0.17. The library's
+// index is bundled into extension.js, so its hooksDir() is dist/hooks.
 const witnessHooks = 'node_modules/@projectrevivesolutions/witness/dist/hooks';
 for (const file of readdirSync(witnessHooks)) {
   copyFileSync(`${witnessHooks}/${file}`, `dist/hooks/${file}`);

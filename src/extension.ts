@@ -88,7 +88,6 @@ export interface DeepTestApi {
 export function activate(context: vscode.ExtensionContext): DeepTestApi {
   setRuntimeEnvironment({
     wasmDir: vscode.Uri.joinPath(context.extensionUri, 'dist').fsPath,
-    hooksDir: vscode.Uri.joinPath(context.extensionUri, 'dist', 'hooks').fsPath,
   });
   const output = vscode.window.createOutputChannel('DeepTest');
   const state = new ResultState();

@@ -9,9 +9,9 @@ tsconfig*.json
 scratch/**
 **/*.map
 .gitignore
-hooks/**
 vitest.config.ts
 .deeptest/**
+.refactorit/**
 *.vsix
 
 .keepsafe/**

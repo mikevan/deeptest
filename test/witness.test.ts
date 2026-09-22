@@ -13,9 +13,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { repoWasmDir } from '../src/languages/shared/treeSitter';
-import { createInstrumenter } from '@projectrevivesolutions/witness';
+import { createInstrumenter, DECORATED_FIELD } from '@projectrevivesolutions/witness';
 import type { WitnessInstrumenter } from '@projectrevivesolutions/witness';
-import { nodeSupportsWitness, parseMochaSummary, detectRunner, witnessUniverse, detectPlaywrightCt, writePlaywrightFixture, playwrightComponentTests, playwrightWrapperConfig, parsePlaywrightSummary, mergePlaywrightRecords, mergeWitnessReports } from '../src/languages/typescript/coverage';
+import { nodeSupportsWitness, parseMochaSummary, detectRunner, witnessUniverse, detectPlaywrightCt, writePlaywrightFixture, playwrightComponentTests, playwrightWrapperConfig, parsePlaywrightSummary, mergePlaywrightRecords, mergeWitnessReports, writeShadowTree } from '../src/languages/typescript/coverage';
 
 let witness: WitnessInstrumenter;
 const wasmDir = repoWasmDir();
@@ -27,7 +27,8 @@ beforeAll(async () => {
 test('differential: the maps agree with istanbul-lib-instrument on every fixture and on DeepTest itself', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { createInstrumenter: istanbul } = require('istanbul-lib-instrument') as { createInstrumenter: (o: unknown) => { instrumentSync: (c: string, f: string) => string; lastFileCoverage: () => { statementMap: Record<string, { start: { line: number } }>; fnMap: Record<string, { loc: { start: { line: number } } }>; branchMap: Record<string, { type: string; line: number }> } } };
-  const roots = [path.join('test', 'fixtures'), 'src', 'hooks'];
+  // 'hooks' was a third root until 1.0.17, when the last DeepTest hook went away: every hook now ships from the Witness package, whose own suite runs this same differential over them.
+  const roots = [path.join('test', 'fixtures'), 'src'];
   const files: string[] = [];
   const walk = (dir: string): void => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -53,8 +54,24 @@ test('differential: the maps agree with istanbul-lib-instrument on every fixture
     const ours = witness.mapsOnly(file.split(path.sep).join('/'), source);
     const lines = (m: Record<string, { start?: { line: number }; loc?: { start: { line: number } } }>) => Array.from(new Set(Object.values(m).map((e) => (e.loc ?? e).start!.line))).sort((a, b) => a - b);
     const branches = (m: Record<string, { type: string; line: number }>) => Object.values(m).map((b) => `${b.type}@${b.line}`).sort();
-    const same = JSON.stringify([lines(i.statementMap), lines(i.fnMap), branches(i.branchMap)]) === JSON.stringify([lines(ours.statementMap), lines(ours.fnMap), branches(ours.branchMap)]);
-    if (!same || ours.skipped.length > 0) {
+    // The one departure from istanbul, and it is deliberate: a decorated
+    // class's field initialiser is left exactly as written, because Angular's
+    // compiler rejects any wrapper around it with NG8110. Witness records
+    // those lines as skipped instead of counting them, so istanbul having a
+    // statement where Witness has a recorded skip is agreement, not drift.
+    // Every other skip is still a failure, and a statement Witness invented
+    // where istanbul has none still fails, so this cannot hide real drift.
+    // The excuse is allowed only in a file that actually carries a decorator.
+    // Without that guard, broadening the rule to every class would silently
+    // excuse itself and this test would pass on code it is supposed to catch;
+    // it did exactly that on the first attempt.
+    const hasDecorator = /^[ \t]*@[A-Za-z_$][\w$.]*\s*[({]/m.test(source);
+    const excused = new Set(hasDecorator ? ours.skipped.filter((k) => k.reason === DECORATED_FIELD).map((k) => k.line) : []);
+    const unexcused = ours.skipped.filter((k) => k.reason !== DECORATED_FIELD || !hasDecorator);
+    const oursStatements = lines(ours.statementMap);
+    const theirsStatements = lines(i.statementMap).filter((line) => !excused.has(line) || oursStatements.includes(line));
+    const same = JSON.stringify([theirsStatements, lines(i.fnMap), branches(i.branchMap)]) === JSON.stringify([oursStatements, lines(ours.fnMap), branches(ours.branchMap)]);
+    if (!same || unexcused.length > 0) {
       failures.push(`${file}: statements ${lines(i.statementMap).join(',')} vs ${lines(ours.statementMap).join(',')}; functions ${lines(i.fnMap).join(',')} vs ${lines(ours.fnMap).join(',')}; branches ${branches(i.branchMap).join(' ')} vs ${branches(ours.branchMap).join(' ')}; skipped ${ours.skipped.map((s) => s.line).join(',')}`);
     }
   }
@@ -136,4 +153,37 @@ test('Playwright component tests: detection, the fixture, the wrapper config, th
     ['a.spec.tsx::one', [4, 7], { '0': [0] }],
     ['a.spec.tsx::two', [7], { '0': [1] }],
   ]);
+});
+
+/**
+ * The half of the mirror that is easy to forget. A component names its
+ * template and stylesheet by relative path and the stylesheet names an image
+ * the same way; mirror only the TypeScript and every one of those dangles.
+ */
+test('the shadow tree instruments the source and copies everything beside it', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deeptest-mirror-'));
+  const src = path.join(dir, 'src', 'app');
+  fs.mkdirSync(src, { recursive: true });
+  fs.writeFileSync(path.join(src, 'greeting.ts'), "export function hello(name: string) {\n  return `Hello, ${name}!`;\n}\n");
+  fs.writeFileSync(path.join(src, 'greeting.html'), '<h1>{{ text() }}</h1>\n');
+  fs.writeFileSync(path.join(src, 'greeting.css'), ".g { background-image: url('./logo.svg'); }\n");
+  fs.writeFileSync(path.join(src, 'logo.svg'), '<svg/>\n');
+  fs.writeFileSync(path.join(src, 'greeting.spec.ts'), "describe('x', () => {});\n");
+
+  const sourceRoot = path.join(dir, 'src');
+  const mirror = path.join(dir, '.deeptest', 'instrumented');
+  const log: string[] = [];
+  const tree = await writeShadowTree(dir, sourceRoot, mirror, ['src/app/greeting.ts', 'src/app/gone.ts'], repoWasmDir(), (l) => log.push(l));
+
+  const instrumented = fs.readFileSync(path.join(mirror, 'app', 'greeting.ts'), 'utf8');
+  assert.match(instrumented, /__witness__\.file\("__witness_\w+", \{"path":/, 'the maps ride in the file: a browser page cannot be told about it any other way');
+  assert.ok(instrumented.includes(path.join(sourceRoot, 'app', 'greeting.ts').split(path.sep).join('/')), 'labelled with the original path, so a record names the file in the editor');
+  for (const beside of ['greeting.html', 'greeting.css', 'logo.svg', 'greeting.spec.ts']) {
+    assert.ok(fs.existsSync(path.join(mirror, 'app', beside)), `${beside} is copied through, or the reference to it dangles`);
+  }
+  assert.equal(fs.readFileSync(path.join(mirror, 'app', 'greeting.spec.ts'), 'utf8'), "describe('x', () => {});\n", 'a spec is copied, never instrumented: its own lines are not the subject');
+  assert.equal(tree.instrumented, 1);
+  assert.match(tree.universe.find((c) => c.path === 'src/app/gone.ts')?.unmeasured ?? '', /could not be read/, 'a file the instrumenter could not take is still reported, with the reason, rather than counted as measured');
+  assert.ok(!fs.existsSync(path.join(mirror, 'app', 'gone.ts')), 'and nothing is invented in its place');
+  assert.deepEqual(Array.from(tree.universe.find((c) => c.path === 'src/app/greeting.ts')!.lines.keys()), [2], 'one walk gives the mirror and the executable lines, so the two cannot disagree');
 });

@@ -18,3 +18,5 @@ test/fixtures/helloworld-*/node_modules/
 # UntangleIt's working files, when UntangleIt measures this project; the run record travels with the code.
 .untangleit/*
 !.untangleit/runs.json
+# The tool was renamed to UntangleIt on 2026-09-11. Its records must not come back.
+.refactorit/**

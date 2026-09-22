@@ -175,24 +175,29 @@ and functions per test as it does today, to the line.
   the project's own. The `react-jest` port answered the composing risk exactly
   as this step said it should: eleven tests, per-test attribution, and figures
   identical to the react-vitest port file for file.
-- **1.0.14, Karma.** The same bundling problem as Angular under Vitest, without
-  the clean answer, because a Karma preprocessor sees what the builder already
-  served. Getting Witness in ahead of the bundle rather than preprocessing after
-  it is the open question. This is the riskiest step and it is deliberately last
-  of the runners.
-- **1.0.15, the last Istanbul universe, and the dependencies come out.** The
-  Karma path still measures files no test loads with the project's
-  `istanbul-lib-instrument`, through `unloadedCoverages`. Replacing that with
-  `witnessUniverse` is what lets both Istanbul packages leave DeepTest's
-  `package.json`, and that commit is the point at which "one instrument, every
-  framework" stops being a sentence and becomes something a reader can verify.
+- **Karma, and the last Istanbul universe.** Planned here as 1.0.14 and 1.0.15,
+  delivered as 1.0.17. The same bundling problem as Angular under Vitest, and
+  the answer turned out to be the same one: get Witness in ahead of the bundle
+  rather than preprocess after it. A Karma preprocessor only ever sees what the
+  builder already served, so neither runner is reachable from inside the
+  builder's own pipeline.
+
+The numbering in this phase is the plan's, not the tree's, and the two parted
+company on 2026-09-22. What actually shipped: 1.0.11 Vitest, 1.0.12 Angular
+under Vitest (wrong, reverted), 1.0.13 Mocha and Playwright, 1.0.14 evidence
+integrity, 1.0.15 the Angular Istanbul baseline restored and the engines
+preflight added, 1.0.16 Jest, and 1.0.17 Angular under both runners with
+Istanbul removed from the product. The steps are the ones this phase names;
+only the numbers moved.
 
 Verify, at the end of phase 6: DeepTest's `package.json` names no coverage
 package, every HelloWorlds port reports the numbers it reports today, and a fresh
 project of any of the six shapes runs with nothing installed beyond its own test
-runner.
+runner. Met at 1.0.17. `istanbul-lib-instrument` remains a devDependency, and
+only that: it is the oracle the differential test grades Witness's maps
+against, and it ships in nothing.
 
-## Phase 7: UntangleIt on Witness (1.0.16), and the design comes first
+## Phase 7: UntangleIt on Witness (1.0.19), and the design comes first
 
 UntangleIt currently declares `@projectrevivesolutions/witness` and uses nothing
 from it. The fingerprint gate is what it was declared for: proving that an
@@ -206,7 +211,28 @@ document, not a commit, and the document is not frozen until he rules on it.
 Nothing here sketches the mechanism, because a sketch written in a plan hardens
 into a decision nobody made.
 
-## Phase 8: CommentIt, deliberately thin (1.0.17)
+## The sequence to closeout, ruled 2026-09-22
+
+The owner ruled the finish line on 2026-09-22, after this plan had already been
+overtaken by the tree. 1.x closes with no known technical debt left behind, and
+only a genuinely critical defect reopens it afterwards. The remaining steps, in
+order:
+
+- **1.0.18, make the contract real.** The published API and what the tools
+  actually do are checked against each other rather than assumed to agree.
+- **1.0.19, the UntangleIt behaviour gate.** Phase 7 above, unchanged in
+  substance and renumbered.
+- **Release qualification**, then the Marketplace.
+
+CommentIt is not in that list. It was removed from 1.x on the same day, on the
+grounds that a tool whose job is to explain why code exists needs a semantic
+model that 1.x does not have, and that building a structure-only version of it
+inside this series is the definition of something that belongs somewhere else.
+The brief below is kept because the thinking in it is worth keeping, not
+because it is 1.x work. It is not scheduled here, and nothing in this series
+depends on it.
+
+## CommentIt, deliberately thin: a brief, not a phase (removed from 1.x, 2026-09-22)
 
 CommentIt is the fourth tool and the "explain" verb: doc comments for every
 file, class, and method of untangled code, plus a README, in the style the
@@ -241,9 +267,10 @@ The full CommentIt, the one that reads the ladder from application intent down
 to the method and turns a scene on every rung, is 2.x work and is not designed
 here.
 
-Verify: on a HelloWorlds port, every file, class, and method carries a comment
-that a person reading the code agrees with, and every "why" the tool could not
-establish is marked as such rather than filled in.
+What would have to be true of it, if it is ever built: on a HelloWorlds port,
+every file, class, and method carries a comment that a person reading the code
+agrees with, and every "why" the tool could not establish is marked as such
+rather than filled in.
 
 ## What this slot owes, recorded 2026-09-19
 
