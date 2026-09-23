@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import { DecidedFunction, DecidedLine, DecisionFile, DecisionState, applyDecisions, applyFunctionDecisions, emptyDecisionFile } from './decisions/decisions';
 import { AnalysisResult, FileResult } from './engine/types';
 import { TestRunSummary } from './languages/types';
+import type { ProblemPacket } from '@projectrevivesolutions/witness';
 
 export type Phase = 'idle' | 'running' | 'results' | 'noTests' | 'error';
 
@@ -26,6 +27,8 @@ export class ResultState implements vscode.Disposable {
   result: AnalysisResult | undefined;
   run: RunInfo | undefined;
   message = '';
+  /** What the toolkit established about the current failure, when it placed one. */
+  problem: ProblemPacket | undefined;
   /** Files edited since the last run. Their overlay is still shown but flagged. */
   readonly stale = new Set<string>();
   overlayVisible = true;
@@ -63,6 +66,7 @@ export class ResultState implements vscode.Disposable {
   setRunning(): void {
     this.phase = 'running';
     this.message = '';
+    this.problem = undefined;
     this.fire();
   }
 
@@ -85,9 +89,14 @@ export class ResultState implements vscode.Disposable {
     this.fire();
   }
 
-  setError(message: string): void {
+  /**
+   * The check did not finish. `packet` is present when the toolkit placed
+   * the failure, and is what the "Explain with Copilot" offer is built from.
+   */
+  setError(message: string, packet?: ProblemPacket): void {
     this.phase = 'error';
     this.message = message;
+    this.problem = packet;
     this.fire();
   }
 
@@ -96,6 +105,7 @@ export class ResultState implements vscode.Disposable {
     this.result = undefined;
     this.run = undefined;
     this.message = '';
+    this.problem = undefined;
     this.stale.clear();
     this.byPath.clear();
     this.decided = [];

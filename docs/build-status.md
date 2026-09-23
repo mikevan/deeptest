@@ -17,6 +17,55 @@ pack, and the library). From here the minor number moves once per language
 across the whole toolkit (Java 1.1, C# 1.2, C++ 1.3, Go or PHP 1.4); patch
 numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
 
+## 2026-09-22, before 1.0.19: pre-gate hygiene
+
+Two loose ends named at the close of 1.0.18 and settled before the UntangleIt
+behaviour gate starts. Neither gets a version of its own; both ride with
+1.0.19.
+
+- The 21 to 18 attributed-line change on the Angular port is reconciled line by
+  line. `greet.ts` and `names.ts` attribute exactly what they attributed
+  before; every missing line is in `greeting.ts`, two of them artifacts of the
+  builder's compiled output and one a decorated field initialiser that is now
+  explicitly skipped with its reason. The full account, including the
+  limitation that the two compiled-only entries have no true source-line
+  identity, is in the engineering notes. No product change.
+- Every coverage provider is out of the demonstration projects: eleven
+  declarations removed, `@vitest/coverage-istanbul` from the angular-vitest,
+  react-vitest, svelte-vitest, and vue-vitest ports and from five test
+  fixtures, and `karma-coverage` from the angular-karma port and its fixture.
+  The rule is not the package name. The claim qualification has to support is
+  that DeepTest and Witness measure a supported project without the project
+  installing a coverage provider, and the Karma side of that claim needed
+  `karma-coverage` gone as much as the Vitest side needed the other one.
+  Checked first: no port or fixture config named a provider, and angular-karma
+  has no `karma.conf.js` at all, so both packages were declared and never
+  referenced.
+- `karma-coverage` is back in the Angular Karma preflight, and this one was a
+  defect in shipped code rather than hygiene. 1.0.17 dropped it from
+  `checkAngularEnvironment` because DeepTest had stopped using it, which was
+  true and beside the point: Angular's Karma runner demands it before it will
+  start, so 1.0.17 and 1.0.18 told a Karma user the environment was ok and
+  then let the runner refuse. That is the exact shape the 1.0.15 preflight was
+  built to remove. The message names both halves: "karma-coverage is required
+  by Angular's Karma runner. DeepTest/Witness does not use it for
+  measurement." No Istanbul path, coverage configuration, or old hook came
+  back with it; the run still enables no coverage and reads none of its
+  output. A new test withholds each of the four packages the builder checks
+  for in turn and fails if the preflight stops asking for any of them,
+  whatever the reasoning at the time. It fails against the 1.0.17 removal.
+- `prepareWorkDir` now empties `.deeptest` by ownership rather than deleting
+  three folders by name (`clearWorkDir`). It keeps `decisions.json`, which is
+  the person's and travels with the code, and removes everything else, because
+  the run rebuilds it. Deleting by name only removes the names someone thinks
+  of, and the one worth removing was the one nobody thought of:
+  `.deeptest/vitest.config.mjs`, written by the Istanbul Angular path until
+  1.0.15, was still in the ports two deliveries after the code that wrote it
+  was deleted, still saying `provider: 'istanbul'`, still looking like current
+  configuration. A test pins the rule and fails against the old by-name
+  version, naming that file.
+- Tests: 222 in DeepTest, two more than 1.0.18.
+
 ## 2026-09-22, 1.0.18: the published contract is cut down to the product, and checked
 
 - `toolkit-api.md` is draft 6. Removed from the contract and moved to a new
@@ -133,8 +182,9 @@ numbers cover everything else. See docs/toolkit/toolkit-roadmap.md.
   compiled output, where a decorated class field lowers into statements.
   Witness counts the source, and names the two initialisers in `greeting.ts`
   that Angular requires to appear exactly as written rather than counting
-  them. The full line-by-line reconciliation against the 1.0.15 table has not
-  been done.
+  them. Reconciled line by line against the 1.0.15 table before 1.0.19; the
+  whole difference is `greeting.ts` going 4/4/4 to 1/1/1, and the account is in
+  the engineering notes under "The Angular numbers, reconciled".
 - Verify: those two survey runs. They are the pair that matters, because the
   two ports hold identical TypeScript and differ only in their runner, so any
   disagreement between the tables is a defect and not a difference of opinion.

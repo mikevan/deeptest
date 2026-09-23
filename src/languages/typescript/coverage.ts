@@ -42,9 +42,82 @@ import { FileCoverage } from '../../engine/types';
 import { runProcess } from '../shared/process';
 import { CoverageRun, CoverageSource, EnvironmentCheck, Evidence, LanguageSettings, RunContext, TestRunSummary } from '../types';
 import { detectAngularKarmaConfig, detectAngularRunnerConfig, detectAngularTestTarget, detectFramework } from './framework';
-import { createInstrumenter, hooksDir as witnessHooksDir, HOOK_FILES as WITNESS_HOOK_FILES, ENV as WITNESS_ENV, nodeSupportsWitness } from '@projectrevivesolutions/witness';
+import {
+  createInstrumenter,
+  ENV as WITNESS_ENV,
+  nodeSupportsWitness,
+  copyHooks,
+  readPackageJson,
+  findVitestConfig,
+  resolveModuleDir,
+  detectRunner,
+  vitestWrapperConfig,
+  witnessTransform,
+  angularKarmaConfig,
+  writeShadowTree as mirrorSourceRoot,
+  detectPlaywrightCt,
+  writePlaywrightFixture as writeWitnessPlaywrightFixture,
+  playwrightWrapperConfig as witnessPlaywrightWrapperConfig,
+  pathCondition,
+  pathConditionNote,
+  presentPathFailure,
+  writeShadowTsConfig,
+  parseTsConfigText,
+  readTsPaths,
+  renameTestFiles,
+  posixPath,
+  splitArgs,
+  escapeRegex,
+} from '@projectrevivesolutions/witness';
+import type { Runner, TsPaths, JestResolvedConfig, WitnessMaps, ProblemPacket } from '@projectrevivesolutions/witness';
 
-export { nodeSupportsWitness };
+// The runner-delivery layer lives in Witness, so both tools reach a project's
+// own runner the same way. These are re-exported because they are part of the
+// TypeScript driver's surface and its callers should not have to know which
+// package a helper moved to.
+export { detectPlaywrightCt, readPackageJson, findVitestConfig, resolveModuleDir, detectRunner, witnessTransform, angularKarmaConfig, writeShadowTsConfig, parseTsConfigText, readTsPaths, renameTestFiles, nodeSupportsWitness };
+export type { Runner, TsPaths, JestResolvedConfig };
+
+/**
+ * The pointer at the run log, in the words of the control a person presses.
+ * The results panel carries a "Show the log" link, so this says "Show the
+ * log" and not "check the output" or anything else a person cannot find.
+ */
+export const SHOW_THE_LOG = 'Press "Show the log" to see the runner\'s own output.';
+
+/**
+ * The one line a person reads on the results panel when a run failed.
+ *
+ * When the toolkit diagnosed the failure, its headline is the whole message.
+ * It is not glued onto the end of the runner's own reason, because the
+ * runner's reason in that case is "produced no coverage, and ended with exit
+ * code 1", which is true, useless, and, read first, sends someone looking at
+ * their tests. The runner's reason still goes to the log.
+ *
+ * With no diagnosis, nothing changes: the person reads the reason the run
+ * gave, exactly as before.
+ */
+export function userFacingFailure(reason: string, headline: string): string {
+  return headline || reason;
+}
+
+/**
+ * A failure the toolkit placed, carrying what it established.
+ *
+ * The packet rides on the error so that the layer which shows the failure
+ * can offer to have it explained, without this file knowing anything about
+ * panels, assistants, or buttons.
+ */
+export class DiagnosedError extends Error {
+  constructor(
+    message: string,
+    readonly packet: ProblemPacket,
+  ) {
+    super(message);
+    this.name = 'DiagnosedError';
+  }
+}
+
 import { pathToFileURL } from 'node:url';
 import { runtimeEnvironment } from '../shared/runtime';
 import { engineMismatch, engineMismatchSentence } from './engines';
@@ -55,7 +128,6 @@ import { engineMismatch, engineMismatchSentence } from './engines';
  * because an Angular project's tests need the Angular compiler and
  * TestBed that only the builder provides (1.0 survey, finding 3a).
  */
-export type Runner = 'jest' | 'vitest' | 'ng-vitest' | 'ng-karma' | 'mocha' | 'playwright-ct';
 
 export interface TsFields {
   runner: 'auto' | Runner;
@@ -68,7 +140,13 @@ export function tsFields(settings: LanguageSettings): TsFields {
   return { runner, extraArgs: typeof f.extraArgs === 'string' ? f.extraArgs : '' };
 }
 
-const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'out', 'build', 'coverage', '.deeptest', '.vscode-test', '.next', '.nuxt', '.svelte-kit', 'vendor']);
+// The sibling tools' folders are skipped alongside DeepTest's own. UntangleIt
+// writes generated hooks and a shadow tree into .untangleit from 1.0.19, and
+// the two tools are meant to be installed together, so a project measured
+// after an untangling would otherwise have UntangleIt's generated files walked
+// as if they were the person's source. UntangleIt has skipped all three since
+// it shipped; this is the same list from the other side.
+const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'out', 'build', 'coverage', '.deeptest', '.untangleit', '.keepsafe', '.vscode-test', '.next', '.nuxt', '.svelte-kit', 'vendor']);
 /** Source files the plugin walks and instruments. Single-file components (.vue, .svelte) are included from 1.0.2 so they show red rather than vanish. */
 const SOURCE_EXT = /\.(m?[jt]sx?|c[jt]s|vue|svelte)$/;
 /** The same set as a glob for the runners' coverage include lists. */
@@ -78,6 +156,42 @@ const TEST_FILE = /(\.(test|spec)\.[cm]?[jt]sx?$)/;
 export function isTestFile(relativePath: string): boolean {
   const name = path.basename(relativePath);
   return TEST_FILE.test(name) || relativePath.split('/').includes('__tests__');
+}
+
+/**
+ * What travels with the code rather than being generated. Everything else in
+ * `.deeptest` belongs to a run.
+ */
+const WORK_DIR_KEEP = new Set(['decisions.json']);
+
+/**
+ * Empty the tool's folder, keeping only what is the person's.
+ *
+ * This used to delete the three folders a run writes, by name, which meant a
+ * generated file DeepTest had stopped producing stayed forever. The Angular
+ * path wrote `.deeptest/vitest.config.mjs` until 1.0.15; two deliveries after
+ * the code that wrote it was deleted, the file was still sitting in the ports,
+ * still naming a coverage provider, still looking like current configuration
+ * to anyone who opened it. Deleting by name can only ever remove the names we
+ * think of, and the ones worth removing are the ones we have forgotten.
+ *
+ * So the rule is ownership, not a list. `.deeptest` is DeepTest's, except the
+ * decisions, which are the person's and are meant to be committed. Everything
+ * else in it is rebuilt by the run that follows this call, and a stale source
+ * file's instrumented copy cannot survive to be served by the transformer.
+ */
+export function clearWorkDir(workDir: string): void {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(workDir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!WORK_DIR_KEEP.has(entry)) {
+      fs.rmSync(path.join(workDir, entry), { recursive: true, force: true });
+    }
+  }
 }
 
 export function walkSources(root: string, relative = ''): string[] {
@@ -100,68 +214,6 @@ export function walkSources(root: string, relative = ''): string[] {
   }
   return out;
 }
-
-export function readPackageJson(workspaceRoot: string): { deps: Record<string, string>; scripts: Record<string, string>; jest?: unknown; mocha?: unknown } | undefined {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(workspaceRoot, 'package.json'), 'utf8')) as Record<string, unknown>;
-    return {
-      deps: { ...(pkg.dependencies as Record<string, string> | undefined), ...(pkg.devDependencies as Record<string, string> | undefined) },
-      scripts: (pkg.scripts as Record<string, string> | undefined) ?? {},
-      jest: pkg.jest,
-      mocha: pkg.mocha,
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-export function findVitestConfig(workspaceRoot: string): string | undefined {
-  for (const name of ['vitest.config.ts', 'vitest.config.mts', 'vitest.config.js', 'vitest.config.mjs', 'vitest.config.cjs', 'vite.config.ts', 'vite.config.mts', 'vite.config.js', 'vite.config.mjs']) {
-    if (fs.existsSync(path.join(workspaceRoot, name))) {
-      return name;
-    }
-  }
-  return undefined;
-}
-
-/**
- * Finds an installed package by walking up from the workspace, the way Node
- * resolves modules. Monorepos hoist runners to the repository root.
- */
-export function resolveModuleDir(workspaceRoot: string, name: string): string | undefined {
-  let dir = workspaceRoot;
-  for (;;) {
-    const candidate = path.join(dir, 'node_modules', ...name.split('/'));
-    if (fs.existsSync(path.join(candidate, 'package.json'))) {
-      return candidate;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) {
-      return undefined;
-    }
-    dir = parent;
-  }
-}
-
-/** Which runner the project uses, from its dependencies and config files. */
-export function detectRunner(workspaceRoot: string): Runner | undefined {
-  const pkg = readPackageJson(workspaceRoot);
-  const hasVitest = Boolean(pkg?.deps.vitest) || Boolean(resolveModuleDir(workspaceRoot, 'vitest'));
-  const hasJest = Boolean(pkg?.deps.jest) || Boolean(resolveModuleDir(workspaceRoot, 'jest'));
-  const hasMocha = Boolean(pkg?.deps.mocha) || Boolean(resolveModuleDir(workspaceRoot, 'mocha'));
-  const testScript = pkg?.scripts.test ?? '';
-  const named = (word: string): boolean => new RegExp(`\\b${word}\\b`).test(testScript);
-  // The test script settles a tie; otherwise the order is Vitest, Jest, Mocha.
-  const present = [hasVitest && 'vitest', hasJest && 'jest', hasMocha && 'mocha'].filter((r): r is 'vitest' | 'jest' | 'mocha' => Boolean(r));
-  if (present.length > 1) {
-    const chosen = present.filter((r) => named(r));
-    if (chosen.length === 1) {
-      return chosen[0];
-    }
-  }
-  return present[0];
-}
-
 
 export function guessTestsPath(workspaceRoot: string): string {
   for (const candidate of ['test', 'tests', '__tests__', 'spec', 'src/__tests__']) {
@@ -259,40 +311,6 @@ export function parseAttribution(lines: string[]): AttributionRecord[] {
   return out;
 }
 
-/**
- * Joins coverage-final.json (the executable universe and what executed at
- * all) with the hook's attribution lines (which test executed what).
- */
-/**
- * The spec file in a test id, moved from where the test ran to where the
- * person wrote it.
- *
- * A run through the shadow tree executes the copy under .deeptest, so every
- * runner names that copy: the Vitest hook takes the path Vitest gives it, the
- * Karma client takes the URL the browser was served. Both are true and
- * neither is useful. The lines in the record already name the original
- * source, because the maps carry the original path, so leaving the test id
- * alone would produce a card whose lines point into the project and whose
- * test names point into a generated folder. Only the leading folder changes;
- * the rest of the path and the test name are untouched.
- */
-export function renameTestFiles(lines: string[], from: string, to: string): string[] {
-  return lines.map((line) => {
-    if (!line.includes(from)) {
-      return line;
-    }
-    try {
-      const record = JSON.parse(line) as { test?: string };
-      if (typeof record.test !== 'string' || !record.test.startsWith(from)) {
-        return line;
-      }
-      return JSON.stringify({ ...record, test: `${to}${record.test.slice(from.length)}` });
-    } catch {
-      return line;
-    }
-  });
-}
-
 export function buildCoverages(workspaceRoot: string, coverageJson: string, attributionLines: string[]): FileCoverage[] {
   const final = JSON.parse(coverageJson) as Record<string, IstanbulFile>;
   const rel = (abs: string): string => path.relative(workspaceRoot, abs).split(path.sep).join('/');
@@ -336,14 +354,6 @@ export function buildCoverages(workspaceRoot: string, coverageJson: string, attr
   return Array.from(byPath.values()).sort((a, b) => a.path.localeCompare(b.path));
 }
 
-function splitArgs(text: string): string[] {
-  return text.trim() ? text.trim().split(/\s+/) : [];
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /**
  * The packages DeepTest actually starts for a runner, in the order a person
  * would meet them. Angular's CLI is first because it is the process that
@@ -363,38 +373,6 @@ export function enginePackages(runner: Runner, workspaceRoot: string): string[] 
     return ct ? [ct.package, '@playwright/test'] : ['@playwright/test'];
   }
   return [runner];
-}
-
-/** The parts of `jest --showConfig`'s resolved project config this driver reads. */
-export interface JestResolvedConfig {
-  /** [pattern, resolved transformer path, its options]. Jest fills in its default (babel-jest) when a project sets none. */
-  transform?: Array<[string, string, unknown]>;
-  setupFiles?: string[];
-  setupFilesAfterEnv?: string[];
-}
-
-/**
- * The project's transform table with every transformer wrapped by ours, and
- * the original passed through as an option so the wrapper can call it. The
- * patterns are the project's own, untouched, so a project that transforms
- * different file types differently keeps doing exactly that.
- *
- * Undefined when the resolved config could not be read or names no
- * transformer, because there is then nothing to wrap and instrumenting
- * nothing would measure nothing.
- */
-export function witnessTransform(entries: Array<[string, string, unknown]> | undefined, witnessTransformPath: string): Record<string, [string, { upstream: [string, unknown] }]> | undefined {
-  if (!entries || entries.length === 0) {
-    return undefined;
-  }
-  const table: Record<string, [string, { upstream: [string, unknown] }]> = {};
-  for (const [pattern, modulePath, options] of entries) {
-    if (typeof pattern !== 'string' || typeof modulePath !== 'string') {
-      return undefined;
-    }
-    table[pattern] = [witnessTransformPath, { upstream: [modulePath, options ?? {}] }];
-  }
-  return table;
 }
 
 export interface TsCoverageOptions {
@@ -561,22 +539,34 @@ export class TypeScriptCoverageSource implements CoverageSource {
       };
     }
     if (runner === 'ng-karma') {
-      // The runner, its Jasmine adapter and a Chrome launcher, all of which
-      // are in every Angular CLI project's devDependencies. Nothing for
-      // coverage: Witness instruments the sources itself, before the builder
-      // bundles them, so karma-coverage and istanbul-lib-instrument stopped
-      // being requirements in 1.0.17. A project that still has them keeps
-      // them; they are simply never reached.
-      for (const [pkg, why] of [
-        ['karma', 'the runner'],
-        ['karma-jasmine', 'the Jasmine adapter'],
-        ['karma-chrome-launcher', 'the headless Chrome launcher'],
+      // This list is Angular's, not ours. Its Karma runner calls
+      // `checker.check(...)` on each of these before it will start
+      // (`@angular/build`, `builders/unit-test/runners/karma/index.js`) and
+      // refuses the run when one is missing, so a check that does not ask for
+      // them first is a check that says "ok" and then watches the runner
+      // refuse. That is the shape 1.0.15 existed to remove.
+      //
+      // `karma-coverage` is on the list and is worth writing down, because it
+      // looks like something we should have dropped. The builder guards that
+      // one with `if (options.coverage)`, and `options.coverage` is normalized
+      // to an object carrying an `enabled` field, so it is truthy whether
+      // coverage is on or off. The Vitest runner in the same builder checks
+      // `options.coverage.enabled` and gets it right. So Karma demands the
+      // package on every run, including this one, which enables no coverage,
+      // generates no coverage reporter, and reads none of its output. 1.0.17
+      // dropped it from this list on the reasoning that DeepTest had stopped
+      // using it, which was true and beside the point: Angular had not.
+      for (const [pkg, problem] of [
+        ['karma', 'Karma needs karma (the runner), and it is not installed under node_modules.'],
+        ['karma-jasmine', 'Karma needs karma-jasmine (the Jasmine adapter), and it is not installed under node_modules.'],
+        ['karma-chrome-launcher', 'Karma needs karma-chrome-launcher (the headless Chrome launcher), and it is not installed under node_modules.'],
+        ['karma-coverage', "karma-coverage is required by Angular's Karma runner. DeepTest/Witness does not use it for measurement."],
       ] as const) {
         if (!resolveModuleDir(workspaceRoot, pkg)) {
           return {
             ok: false,
             summary: `Node ${nodeVersion}, ng test with Karma, ${pkg} missing`,
-            problems: [`Karma needs ${pkg} (${why}), and it is not installed under node_modules.`],
+            problems: [problem],
             fix: { title: `Install ${pkg}`, command: 'npm', args: ['install', '--save-dev', pkg] },
           };
         }
@@ -725,12 +715,12 @@ export class TypeScriptCoverageSource implements CoverageSource {
       throw new Error('No playwright-ct config file was found at the workspace root.');
     }
     const { workDir, attrDir, coverageDir, hookDir, env } = this.prepareWorkDir(ctx);
-    const fixture = writePlaywrightFixture(ctx.workspaceRoot, ct.package);
+    const fixture = writeWitnessPlaywrightFixture(workDir, ct.package);
     const workerHook = pathToFileURL(path.join(hookDir, 'witness-playwright-loader.mjs')).href;
     const { extraArgs } = tsFields(ctx.settings);
     const sourceRoot = path.join(ctx.workspaceRoot, ctx.settings.sourceRoot || '');
     const wrapperPath = path.join(workDir, 'playwright-ct.config.mjs');
-    fs.writeFileSync(wrapperPath, playwrightWrapperConfig(ctx.workspaceRoot, ct.configFile), 'utf8');
+    fs.writeFileSync(wrapperPath, witnessPlaywrightWrapperConfig({ tool: 'DeepTest', workspaceRoot: ctx.workspaceRoot, configFile: ct.configFile }), 'utf8');
     fs.rmSync(path.join(workDir, 'playwright-cache'), { recursive: true, force: true });
     // Only the page is measured. Playwright's own loader transforms what a
     // test imports in the worker and short-circuits every other loader, so
@@ -749,18 +739,24 @@ export class TypeScriptCoverageSource implements CoverageSource {
     };
     const args = [path.join(cli, 'cli.js'), 'test', '-c', wrapperPath, ...splitArgs(extraArgs)];
     ctx.log(`$ NODE_OPTIONS=--import=${workerHook} node ${args.join(' ')}`);
+    this.notePath(ctx, 'playwright-ct');
     const run = await runProcess('node', args, { cwd: ctx.workspaceRoot, env: witnessEnv, log: ctx.log, signal: ctx.signal });
     if (/Executable doesn't exist|playwright install/.test(run.output) && run.exitCode !== 0) {
       throw new Error('Playwright has no browser installed for this project. Run "npx playwright install chromium" in the project, then check again.');
     }
     const tests = parsePlaywrightSummary(run.output, run.exitCode);
+    const guidance = this.explainPath(ctx, 'playwright-ct', run.output, run.exitCode === 0);
     mergePlaywrightRecords(attrDir, coverageDir);
     const relSourceRoot = ctx.settings.sourceRoot || '';
     const walked = walkSources(sourceRoot)
       .map((rel) => (relSourceRoot ? `${relSourceRoot}/${rel}` : rel))
       .filter((rel) => !isTestFile(rel) && !/\.ct\.[cm]?[jt]sx?$/.test(rel));
     const extra = await witnessUniverse(ctx.workspaceRoot, walked, this.options.wasmDir ?? runtimeEnvironment().wasmDir, ctx.log);
-    return this.collect(ctx, 'playwright-ct', coverageDir, attrDir, tests, run.exitCode, extra);
+    try {
+      return this.collect(ctx, 'playwright-ct', coverageDir, attrDir, tests, run.exitCode, extra);
+    } catch (err) {
+      throw this.failed(ctx, err, guidance);
+    }
   }
 
   async run(ctx: RunContext): Promise<CoverageRun> {
@@ -863,40 +859,9 @@ export class TypeScriptCoverageSource implements CoverageSource {
     } else {
       const bin = path.join(moduleDir, 'vitest.mjs');
       const userConfig = findVitestConfig(ctx.workspaceRoot);
-      const hook = path.join(hookDir, 'witness-vitest.mjs');
       const sourceRoot = path.join(ctx.workspaceRoot, ctx.settings.sourceRoot || '');
       const wasmDir = this.options.wasmDir ?? runtimeEnvironment().wasmDir;
-      // A relative import: Vite bundles the wrapper and everything it
-      // imports relatively, so a TypeScript config goes through esbuild
-      // like it would on its own. A file:// URL would be left to Node
-      // instead, which strips the types itself and warns about it.
-      const relativeImport = (p: string): string => {
-        const rel = path.relative(workDir, p).split(path.sep).join('/');
-        return rel.startsWith('.') ? rel : `./${rel}`;
-      };
-      const wrapper = [
-        '// Generated by DeepTest on every run. Wraps the project config; do not edit.',
-        "import { defineConfig, mergeConfig } from 'vitest/config';",
-        `import { witnessPlugin } from ${JSON.stringify(relativeImport(path.join(hookDir, 'witness-vite.mjs')))};`,
-        userConfig ? `import base from ${JSON.stringify(relativeImport(path.join(ctx.workspaceRoot, userConfig)))};` : 'const base = {};',
-        "const resolved = typeof base === 'function' ? await base({ command: 'serve', mode: 'test' }) : base;",
-        'const merged = mergeConfig(resolved, defineConfig({',
-        '  plugins: [witnessPlugin({',
-        `    hooksDir: ${JSON.stringify(hookDir)},`,
-        `    wasmDir: ${JSON.stringify(wasmDir)},`,
-        `    sourceRoot: ${JSON.stringify(sourceRoot)},`,
-        '  })],',
-        '}));',
-        '// setupFiles is replaced, not merged. mergeConfig concatenates arrays, so a',
-        "// merge leaves the project's own setup file first, and a project's setup file",
-        '// usually lives under the source root, which means it is instrumented and',
-        '// calls the runtime in its prologue. Loaded second, the Witness hook is too',
-        '// late and every test file dies on "reading \'file\' of undefined".',
-        'const theirs = merged.test?.setupFiles ?? [];',
-        `merged.test = { ...merged.test, setupFiles: [${JSON.stringify(hook)}, ...(Array.isArray(theirs) ? theirs : [theirs])] };`,
-        'export default merged;',
-        '',
-      ].join('\n');
+      const wrapper = vitestWrapperConfig({ tool: 'DeepTest', workDir, hookDir, wasmDir, sourceRoot, workspaceRoot: ctx.workspaceRoot, userConfig });
       fs.mkdirSync(workDir, { recursive: true });
       const wrapperPath = path.join(workDir, 'vitest.config.mjs');
       fs.writeFileSync(wrapperPath, wrapper, 'utf8');
@@ -928,29 +893,70 @@ export class TypeScriptCoverageSource implements CoverageSource {
     const workDir = path.join(ctx.workspaceRoot, '.deeptest');
     const attrDir = path.join(workDir, 'attribution');
     const coverageDir = path.join(workDir, 'coverage');
-    fs.rmSync(attrDir, { recursive: true, force: true });
-    fs.rmSync(coverageDir, { recursive: true, force: true });
-    // A source file that has since been deleted would otherwise leave its
-    // instrumented copy here, and the transformer would serve it.
-    fs.rmSync(path.join(workDir, 'instrumented'), { recursive: true, force: true });
+    clearWorkDir(workDir);
     fs.mkdirSync(attrDir, { recursive: true });
     // Every hook is copied into .deeptest/ and loaded from there, and found
     // through the environment rather than by a relative path, so a bundling
     // runner cannot rewrite its way out of finding it.
-    const hookDir = path.join(workDir, 'hooks');
-    fs.mkdirSync(hookDir, { recursive: true });
     // The Witness hooks come from the library (bundled into this extension,
-    // so hooksDir() is dist/hooks at runtime and the package's dist in a
-    // checkout); they sit beside DeepTest's own hooks in the same folder.
-    for (const file of WITNESS_HOOK_FILES) {
-      const from = path.join(witnessHooksDir(), file);
-      if (fs.existsSync(from)) {
-        fs.copyFileSync(from, path.join(hookDir, file));
-      }
-    }
+    // so its hooks folder is dist/hooks at runtime and the package's dist in a
+    // checkout); Witness copies them, because putting its hooks in front of a
+    // runner is Witness's job and UntangleIt needs exactly the same thing.
+    const hookDir = copyHooks(path.join(workDir, 'hooks'));
     ctx.log(`Hook copied into ${hookDir}.`);
     const env = { ...process.env, DEEPTEST_ATTRIBUTION_DIR: attrDir, DEEPTEST_HOOKS_DIR: hookDir, [WITNESS_ENV.attributionDir]: attrDir, [WITNESS_ENV.hooksDir]: hookDir, CI: process.env.CI ?? 'true', NO_COLOR: '1', FORCE_COLOR: '0' };
     return { workDir, attrDir, coverageDir, hookDir, env };
+  }
+
+  /**
+   * The project path as a condition of the run, noted before it starts and
+   * explained afterwards if the run failed and the path may be why.
+   *
+   * It never fails a run on its own and never looks at the person's source.
+   * Code a customer wrote to work around this is a solution, not a smell.
+   */
+  private notePath(ctx: RunContext, runner: Runner): void {
+    const note = pathConditionNote(pathCondition(ctx.workspaceRoot), runner);
+    if (note) {
+      ctx.log(note);
+    }
+  }
+
+  /**
+   * The path guidance, split the way Witness splits it: the supporting lines
+   * go to the log, and the one paragraph a person should read comes back for
+   * the caller to show.
+   *
+   * Empty when there is nothing to say, which is every ordinary run.
+   */
+  private explainPath(ctx: RunContext, runner: Runner, output: string, succeeded: boolean): ProblemPacket | undefined {
+    const shown = presentPathFailure({ workspaceRoot: ctx.workspaceRoot, runner, output, succeeded, detailsHint: SHOW_THE_LOG });
+    if (!shown) {
+      return undefined;
+    }
+    for (const line of shown.log) {
+      ctx.log(line);
+    }
+    return shown.packet;
+  }
+
+  /**
+   * What to raise when a run failed and the path may be the reason.
+   *
+   * The guidance replaces the runner's own reason rather than being glued to
+   * the end of it. "ng test produced no coverage, and ended with exit code 1"
+   * is true and useless here: the builder never got as far as a test, and a
+   * person who reads both sentences at once has to work out which one is the
+   * real one. The runner's reason is still written down, in the log, next to
+   * the output it came from.
+   */
+  private failed(ctx: RunContext, err: unknown, packet: ProblemPacket | undefined): Error {
+    const reason = err instanceof Error ? err.message : String(err);
+    if (!packet) {
+      return new Error(reason);
+    }
+    ctx.log(reason);
+    return new DiagnosedError(userFacingFailure(reason, packet.headline), packet);
   }
 
   private collect(ctx: RunContext, runner: Runner, coverageDir: string, attrDir: string, tests: TestRunSummary, exitCode: number | null, extra: FileCoverage[] = [], rename?: { from: string; to: string }): CoverageRun {
@@ -1093,9 +1099,15 @@ export class TypeScriptCoverageSource implements CoverageSource {
     ];
     const witnessEnv = { ...env, [WITNESS_ENV.coverageDir]: coverageDir };
     ctx.log(`$ node ${args.join(' ')}`);
+    this.notePath(ctx, 'ng-vitest');
     const run = await runProcess('node', args, { cwd: ctx.workspaceRoot, env: witnessEnv, log: ctx.log, signal: ctx.signal });
     const tests = parseVitestSummary(run.output, run.exitCode);
-    return this.collect(ctx, 'ng-vitest', coverageDir, attrDir, tests, run.exitCode, universe, rename);
+    const guidance = this.explainPath(ctx, 'ng-vitest', run.output, run.exitCode === 0);
+    try {
+      return this.collect(ctx, 'ng-vitest', coverageDir, attrDir, tests, run.exitCode, universe, rename);
+    } catch (err) {
+      throw this.failed(ctx, err, guidance);
+    }
   }
 
   /**
@@ -1126,7 +1138,7 @@ export class TypeScriptCoverageSource implements CoverageSource {
     const { universe, include, tsConfig, rename } = await this.prepareAngularShadow(ctx, workDir);
     const userConfig = detectAngularKarmaConfig(ctx.workspaceRoot);
     const configPath = path.join(workDir, 'karma.conf.cjs');
-    fs.writeFileSync(configPath, angularKarmaConfig({ workspaceRoot: ctx.workspaceRoot, hookDir, userConfig }), 'utf8');
+    fs.writeFileSync(configPath, angularKarmaConfig({ tool: 'DeepTest', workspaceRoot: ctx.workspaceRoot, hookDir, userConfig }), 'utf8');
     const args = [
       cli,
       'test',
@@ -1140,9 +1152,15 @@ export class TypeScriptCoverageSource implements CoverageSource {
     ];
     const witnessEnv = { ...env, [WITNESS_ENV.coverageDir]: coverageDir };
     ctx.log(`$ node ${args.join(' ')}`);
+    this.notePath(ctx, 'ng-karma');
     const run = await runProcess('node', args, { cwd: ctx.workspaceRoot, env: witnessEnv, log: ctx.log, signal: ctx.signal });
     const tests = parseKarmaSummary(run.output, run.exitCode);
-    return this.collect(ctx, 'ng-karma', coverageDir, attrDir, tests, run.exitCode, universe, rename);
+    const guidance = this.explainPath(ctx, 'ng-karma', run.output, run.exitCode === 0);
+    try {
+      return this.collect(ctx, 'ng-karma', coverageDir, attrDir, tests, run.exitCode, universe, rename);
+    } catch (err) {
+      throw this.failed(ctx, err, guidance);
+    }
   }
 }
 
@@ -1213,157 +1231,6 @@ export function parseMochaSummary(output: string, exitCode: number | null): Test
   return summary;
 }
 
-/**
- * The Karma config DeepTest generates for `ng test` with Karma. Pure, so it
- * can be proven without an Angular project installed: the Angular drivers
- * have no end-to-end test in this suite, and this pins what the builder is
- * handed.
- *
- * It wraps the project's own config when there is one, and otherwise sets
- * the defaults the builder would have applied itself — the builder applies
- * those only when no config file is given, and giving it one therefore takes
- * them away. Then the Witness framework and reporter go on, `kjhtml` comes
- * off because it keeps the browser open waiting for a human, and a bare
- * "Chrome" becomes "ChromeHeadless" so no window opens on a machine that is
- * running a check, not a debugging session.
- *
- * Nothing about coverage appears here. Karma's own coverage reporter is not
- * involved any more: the counters are in the bundle before Karma sees it,
- * and the runtime hands its report back through the reporter below.
- */
-export function angularKarmaConfig(options: { workspaceRoot: string; hookDir: string; userConfig?: string }): string {
-  const posix = (p: string): string => p.split(path.sep).join('/');
-  return [
-    '// Generated by DeepTest on every run. Wraps the Karma config Angular would load; do not edit.',
-    "'use strict';",
-    "const { createRequire } = require('node:module');",
-    `const projectRequire = createRequire(${JSON.stringify(posix(options.workspaceRoot) + '/')});`,
-    'module.exports = function (config) {',
-    options.userConfig
-      ? `  require(${JSON.stringify(posix(path.join(options.workspaceRoot, options.userConfig)))})(config);`
-      : [
-          '  config.set({',
-          "    basePath: '',",
-          "    frameworks: ['jasmine'],",
-          "    plugins: ['karma-jasmine', 'karma-chrome-launcher'].map((p) => projectRequire(p)),",
-          "    reporters: ['progress'],",
-          "    browsers: ['ChromeHeadless'],",
-          '  });',
-        ].join('\n'),
-    '  config.set({',
-    `    plugins: (config.plugins || []).concat([require(${JSON.stringify(posix(path.join(options.hookDir, 'witness-karma.cjs')))})]),`,
-    "    frameworks: (config.frameworks || ['jasmine']).concat(['witness']),",
-    "    reporters: (config.reporters || ['progress']).filter((r) => r !== 'kjhtml').concat(['witness']),",
-    "    browsers: (config.browsers && config.browsers.length ? config.browsers : ['ChromeHeadless']).map((b) => (b === 'Chrome' ? 'ChromeHeadless' : b)),",
-    '  });',
-    '};',
-    '',
-  ].join('\n');
-}
-
-/**
- * A tsconfig with comments and trailing commas, which is what `tsc --init`
- * writes and what every Angular project therefore has. Only enough of JSONC
- * is handled to read one of these: comments outside strings, and a comma
- * before a closing brace or bracket.
- */
-function parseTsConfigText(text: string): Record<string, unknown> | undefined {
-  let out = '';
-  let inString = false;
-  let escaped = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    if (inString) {
-      out += ch;
-      if (escaped) {
-        escaped = false;
-      } else if (ch === '\\') {
-        escaped = true;
-      } else if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      continue;
-    }
-    if (ch === '/' && text[i + 1] === '/') {
-      while (i < text.length && text[i] !== '\n') {
-        i += 1;
-      }
-      out += '\n';
-      continue;
-    }
-    if (ch === '/' && text[i + 1] === '*') {
-      i += 2;
-      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) {
-        i += 1;
-      }
-      i += 1;
-      continue;
-    }
-    out += ch;
-  }
-  try {
-    return JSON.parse(out.replace(/,(\s*[}\]])/g, '$1')) as Record<string, unknown>;
-  } catch {
-    return undefined;
-  }
-}
-
-/** The path aliases a tsconfig is in effect under, with every target resolved to an absolute posix path. */
-export interface TsPaths {
-  paths: Record<string, string[]>;
-  baseUrl?: string;
-}
-
-/**
- * The `paths` a tsconfig declares, following `extends` to the end of the
- * chain. A nearer config's `paths` replaces a further one's outright, which
- * is TypeScript's own rule: `compilerOptions` merges key by key, and `paths`
- * is one key. Each target is resolved where TypeScript resolves it, against
- * `baseUrl` when the same config declares one and against the config's own
- * folder when it does not, so the caller gets absolute paths and never has
- * to reproduce that rule again.
- */
-export function readTsPaths(file: string, seen = new Set<string>()): TsPaths {
-  const absolute = path.resolve(file);
-  if (seen.has(absolute) || !fs.existsSync(absolute)) {
-    return { paths: {} };
-  }
-  seen.add(absolute);
-  const parsed = parseTsConfigText(fs.readFileSync(absolute, 'utf8'));
-  if (!parsed) {
-    return { paths: {} };
-  }
-  const dir = path.dirname(absolute);
-  const options = (parsed.compilerOptions ?? {}) as { baseUrl?: string; paths?: Record<string, string[]> };
-  const extend = parsed.extends;
-  const bases = (Array.isArray(extend) ? extend : typeof extend === 'string' ? [extend] : []).filter((e): e is string => typeof e === 'string' && e.startsWith('.'));
-  let inherited: TsPaths = { paths: {} };
-  for (const base of bases) {
-    const from = readTsPaths(path.resolve(dir, base), seen);
-    inherited = { paths: { ...inherited.paths, ...from.paths }, baseUrl: from.baseUrl ?? inherited.baseUrl };
-  }
-  const baseUrl = options.baseUrl === undefined ? inherited.baseUrl : posixPath(path.resolve(dir, options.baseUrl));
-  if (!options.paths) {
-    return { paths: inherited.paths, baseUrl };
-  }
-  const against = options.baseUrl === undefined ? dir : path.resolve(dir, options.baseUrl);
-  const resolved: Record<string, string[]> = {};
-  for (const [alias, targets] of Object.entries(options.paths)) {
-    resolved[alias] = (Array.isArray(targets) ? targets : []).map((t) => posixPath(path.resolve(against, t)));
-  }
-  return { paths: resolved, baseUrl };
-}
-
-/** Forward slashes, on every host, because every generated config is read by tools that expect them. */
-function posixPath(p: string): string {
-  return p.split(path.sep).join('/');
-}
-
 /** What one shadow tree came out as, for the log line and for the caller's include pattern. */
 export interface ShadowTree {
   /** The folder the mirror was written into, absolute. */
@@ -1410,89 +1277,44 @@ export async function writeShadowTree(
   wasmDir: string,
   log: (line: string) => void,
 ): Promise<ShadowTree> {
-  const universe = await witnessUniverse(workspaceRoot, measurable, wasmDir, log, { sourceRoot, instrumentedDir });
-  const instrumented = new Set(measurable.map((rel) => path.resolve(workspaceRoot, rel)));
-  let copied = 0;
-  const walk = (dir: string): void => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const from = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name !== 'node_modules') {
-          walk(from);
-        }
-        continue;
-      }
-      if (instrumented.has(from)) {
-        continue;
-      }
-      const to = path.join(instrumentedDir, path.relative(sourceRoot, from));
-      fs.mkdirSync(path.dirname(to), { recursive: true });
-      fs.copyFileSync(from, to);
-      copied += 1;
+  // Witness mirrors the tree; DeepTest supplies the rewrite and keeps what
+  // the rewrite produced. That is the whole split: putting instrumented code
+  // in front of a runner is Witness's job, and the executable-line universe
+  // is DeepTest's, because only DeepTest needs one. UntangleIt calls the same
+  // mirror with a rewrite that touches exactly one function in one file.
+  const instrumenter = await createInstrumenter(wasmDir);
+  const maps = new Map<string, WitnessMaps>();
+  const mirror = mirrorSourceRoot({
+    workspaceRoot,
+    sourceRoot,
+    instrumentedDir,
+    files: measurable,
+    rewrite: (absolute, source) => {
+      // One parse gives both halves, so the mirror and the executable lines
+      // cannot disagree. The maps are embedded, so each instrumented module
+      // registers itself with whatever runtime it lands beside.
+      const out = instrumenter.instrument(absolute, source, true);
+      maps.set(absolute, out.maps);
+      return out.code;
+    },
+  });
+  const refused = new Map(mirror.refused.map((r) => [r.path, r.reason]));
+  const universe: FileCoverage[] = measurable.map((rel) => {
+    const reason = refused.get(rel);
+    if (reason !== undefined) {
+      // Dropping the file here made it vanish from the report, which reads as
+      // "nothing wrong here". It is reported as unmeasured with the reason.
+      log(`Could not read the executable lines of ${rel}: ${reason}`);
+      return { path: rel, lines: new Map(), executed: new Set(), unmeasured: `Its executable lines could not be read: ${reason}` };
     }
-  };
-  walk(sourceRoot);
-  const failed = universe.filter((c) => c.unmeasured !== undefined);
-  for (const file of failed) {
-    // It could not be instrumented, so nothing was written for it and the
-    // mirror would have a hole where the build expects a module. The original
-    // goes in its place: the build succeeds, the file runs as written, and it
-    // is already carrying the reason it is not measured.
-    const from = path.resolve(workspaceRoot, file.path);
-    const to = path.join(instrumentedDir, path.relative(sourceRoot, from));
-    try {
-      fs.mkdirSync(path.dirname(to), { recursive: true });
-      fs.copyFileSync(from, to);
-    } catch {
-      // The commonest reason the instrumenter refused a file is that it could
-      // not be read, and then it cannot be copied either. The build will say
-      // what is missing far better than a guess here would.
+    const lines = new Map<number, Set<string>>();
+    for (const stmt of Object.values(maps.get(posixPath(path.resolve(workspaceRoot, rel)))?.statementMap ?? {})) {
+      lines.set(stmt.start.line, new Set());
     }
-  }
-  log(`Shadow source tree at ${instrumentedDir}: ${universe.length - failed.length} instrumented, ${copied + failed.length} copied through.`);
-  return { root: instrumentedDir, instrumented: universe.length - failed.length, copied: copied + failed.length, universe };
-}
-
-/**
- * The tsconfig the builder type-checks the shadow tree with: the project's
- * own test tsconfig, extended, with two things changed.
- *
- * `include` points at the mirror, because that is what is being compiled.
- * And every path alias whose target is inside the source root is repointed
- * into the mirror, because an alias left pointing at the real source would
- * quietly pull the uninstrumented file into the build and that file would
- * then read as never executed. Aliases that point outside the source root
- * are kept as they are, resolved to absolute so they do not have to be
- * relative to a folder they were not written relative to.
- */
-export function writeShadowTsConfig(workDir: string, projectTsConfig: string | undefined, sourceRoot: string, instrumentedDir: string): string {
-  const generated = path.join(workDir, 'tsconfig.shadow.json');
-  const compilerOptions: { paths?: Record<string, string[]> } = {};
-  if (projectTsConfig) {
-    const { paths } = readTsPaths(projectTsConfig);
-    const entries = Object.entries(paths);
-    if (entries.length > 0) {
-      const inside = (target: string): boolean => {
-        const rel = path.relative(sourceRoot, target);
-        return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
-      };
-      compilerOptions.paths = Object.fromEntries(entries.map(([alias, targets]) => [alias, targets.map((t) => (inside(t) ? posixPath(path.join(instrumentedDir, path.relative(sourceRoot, t))) : t))]));
-    }
-  }
-  const config = {
-    ...(projectTsConfig ? { extends: relativeFrom(workDir, projectTsConfig) } : {}),
-    ...(compilerOptions.paths ? { compilerOptions } : {}),
-    include: [`${relativeFrom(workDir, instrumentedDir)}/**/*.ts`, `${relativeFrom(workDir, instrumentedDir)}/**/*.tsx`],
-  };
-  fs.mkdirSync(workDir, { recursive: true });
-  fs.writeFileSync(generated, `${JSON.stringify(config, undefined, 2)}\n`, 'utf8');
-  return generated;
-}
-
-/** A posix path from one folder to another, prefixed with ./ so a tsconfig reads it as relative and not as a package. */
-function relativeFrom(from: string, to: string): string {
-  const rel = posixPath(path.relative(from, to));
-  return rel.startsWith('.') ? rel : `./${rel}`;
+    return { path: rel, lines, executed: new Set() };
+  });
+  log(`Shadow source tree at ${instrumentedDir}: ${mirror.rewritten.length} instrumented, ${mirror.copied + mirror.refused.length} copied through.`);
+  return { root: instrumentedDir, instrumented: mirror.rewritten.length, copied: mirror.copied + mirror.refused.length, universe };
 }
 
 /**
@@ -1589,31 +1411,8 @@ export function reconcile(tests: TestRunSummary, records: AttributionRecord[], c
   };
 }
 
-const PLAYWRIGHT_CT_PACKAGES = ['@playwright/experimental-ct-react', '@playwright/experimental-ct-vue', '@playwright/experimental-ct-svelte', '@playwright/experimental-ct-solid', '@playwright/experimental-ct-react17'];
-const PLAYWRIGHT_CT_CONFIGS = ['playwright-ct.config.ts', 'playwright-ct.config.mts', 'playwright-ct.config.js', 'playwright-ct.config.mjs', 'playwright-ct.config.cjs'];
 
-/** The Playwright component-testing package the project uses, and its config file, or undefined. */
-export function detectPlaywrightCt(workspaceRoot: string): { package: string; configFile?: string } | undefined {
-  const pkg = readPackageJson(workspaceRoot);
-  const found = PLAYWRIGHT_CT_PACKAGES.find((p) => Boolean(pkg?.deps[p]));
-  if (!found) {
-    return undefined;
-  }
-  return { package: found, configFile: PLAYWRIGHT_CT_CONFIGS.find((f) => fs.existsSync(path.join(workspaceRoot, f))) };
-}
 
-/** Writes the fixture to .deeptest/hooks/witness-playwright.ts for the project's package; the worker hook points specs at it. */
-export function writePlaywrightFixture(workspaceRoot: string, ctPackage: string): string {
-  const template = fs.readFileSync(path.join(witnessHooksDir(), 'witness-playwright.template.ts'), 'utf8');
-  const dir = path.join(workspaceRoot, '.deeptest', 'hooks');
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, 'witness-playwright.ts');
-  const content = template.split('__PACKAGE__').join(ctPackage);
-  if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== content) {
-    fs.writeFileSync(file, content, 'utf8');
-  }
-  return file;
-}
 
 /** Component test files under the tests folder (or the whole workspace), relative to the workspace. */
 export function playwrightComponentTests(workspaceRoot: string, settings: LanguageSettings): string[] {
@@ -1623,38 +1422,6 @@ export function playwrightComponentTests(workspaceRoot: string, settings: Langua
     .filter((rel) => isTestFile(rel) || /\.ct\.[cm]?[jt]sx?$/.test(rel));
 }
 
-/** The wrapper config: the project's own config with the Witness Vite plugin added and its relative paths re-rooted. */
-export function playwrightWrapperConfig(workspaceRoot: string, configFile: string): string {
-  const baseUrl = pathToFileURL(path.join(workspaceRoot, configFile)).href;
-  return [
-    '// Generated by DeepTest on every run. Wraps the project\'s Playwright config; do not edit.',
-    `import base from ${JSON.stringify(baseUrl)};`,
-    "import { witnessPlugin } from './hooks/witness-vite.mjs';",
-    "import * as path from 'node:path';",
-    "import { fileURLToPath } from 'node:url';",
-    "const here = path.dirname(fileURLToPath(import.meta.url));",
-    `const projectRoot = ${JSON.stringify(workspaceRoot)};`,
-    "const abs = (p) => (typeof p === 'string' && !path.isAbsolute(p) ? path.resolve(projectRoot, p) : p);",
-    "const plugin = witnessPlugin({ hooksDir: path.join(here, 'hooks'), wasmDir: process.env.WITNESS_WASM_DIR, sourceRoot: process.env.WITNESS_SOURCE_ROOT });",
-    'function withWitness(use) {',
-    "  // Playwright joins ctTemplateDir onto the config's own folder with path.join, so it stays relative to .deeptest/.",
-    "  // Playwright reuses a built bundle when its sources and dependencies are unchanged, config included, so the Witness build lives in its own cache folder, emptied before every run.",
-    "  use = { ...use, ctTemplateDir: path.relative(here, abs(use?.ctTemplateDir ?? 'playwright')), ctCacheDir: path.join(here, 'playwright-cache') };",
-    '  const vite = use.ctViteConfig;',
-    "  if (typeof vite === 'function') {",
-    '    return { ...use, ctViteConfig: async (...args) => { const c = await vite(...args); return { ...c, plugins: [...(c?.plugins ?? []), plugin] }; } };',
-    '  }',
-    '  return { ...use, ctViteConfig: { ...(vite ?? {}), plugins: [...(vite?.plugins ?? []), plugin] } };',
-    '}',
-    "const config = { ...base, use: withWitness(base.use), testDir: abs(base.testDir ?? '.'), outputDir: abs(base.outputDir ?? 'test-results') };",
-    "for (const k of ['snapshotDir', 'globalSetup', 'globalTeardown']) { if (base[k] !== undefined) { config[k] = abs(base[k]); } }",
-    'if (Array.isArray(base.projects)) {',
-    '  config.projects = base.projects.map((p) => ({ ...p, ...(p.testDir ? { testDir: abs(p.testDir) } : {}), ...(p.use ? { use: withWitness(p.use) } : {}) }));',
-    '}',
-    'export default config;',
-    '',
-  ].join('\n');
-}
 
 /** Playwright's summary: "2 passed (2.6s)", "1 failed", "1 flaky", "1 skipped", "1 did not run". */
 export function parsePlaywrightSummary(output: string, exitCode: number | null): TestRunSummary {

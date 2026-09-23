@@ -14,7 +14,7 @@ import { ResultState } from '../state';
 import { PRODUCT, PRODUCT_FULL, Voice, badge, decisionSentence, findingSentence, functionDecisionSentence, summaryRows, testsSentence, unmeasuredSentence, verdict } from './words';
 
 export interface SidebarMessage {
-  type: 'run' | 'configure' | 'report' | 'output' | 'open' | 'fix' | 'accept' | 'undo' | 'decide' | 'fixFunction' | 'undoFunction' | 'toggleNumbers' | 'toggleOverlay';
+  type: 'run' | 'configure' | 'report' | 'output' | 'open' | 'fix' | 'accept' | 'undo' | 'decide' | 'fixFunction' | 'undoFunction' | 'toggleNumbers' | 'toggleOverlay' | 'explain';
   path?: string;
   line?: number;
 }
@@ -139,10 +139,16 @@ ${this.body(voice)}
         return `<div class="verdict notready"><strong>No tests were found.</strong><span class="muted">DeepTest looked ${esc(s.message)}. Without tests there is nothing to check.</span></div>
           <button class="primary" data-act="configure">Tell me where the tests are</button>
           <div class="links"><a data-act="run">Try again</a><a data-act="output">Show the log</a></div>`;
-      case 'error':
+      case 'error': {
+        // When the toolkit placed the failure, the panel offers to have it
+        // explained rather than leaving the person with one line and a log.
+        // The explaining is the assistant's job; the offer is ours.
+        const explain = s.problem?.actions.includes('explain') ? `<button class="primary" data-act="explain">Explain with Copilot</button>` : '';
         return `<div class="verdict notready"><strong>The check did not finish.</strong><span class="muted">${esc(s.message)}</span></div>
-          <button class="primary" data-act="run">Check my code again</button>
+          ${explain}
+          <button class="${explain ? '' : 'primary'}" data-act="run">Check my code again</button>
           <div class="links"><a data-act="output">Show the log</a><a data-act="configure">Change the setup</a></div>`;
+      }
       case 'results':
         return this.results(voice);
       default:

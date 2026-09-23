@@ -5,6 +5,112 @@ Michael Van Geertruy, with Claude. Project Revive Solutions, LLC.
 What was tried, what failed, and why the code looks the way it does.
 Kept here so nobody re-learns it the hard way.
 
+## Angular's Karma runner demands karma-coverage with coverage off (2026-09-22)
+
+1.0.17 moved Angular onto Witness and took `karma-coverage` out of the
+environment check, because DeepTest had stopped using it. The reasoning was
+about us and the requirement is not ours. Angular's Karma runner refuses to
+start without the package, and a real Angular Karma project said so:
+
+    The following packages are required but were not found:
+      * karma-coverage
+
+`@angular/build`, `builders/unit-test/runners/karma/index.js`:
+
+    if (options.coverage) {
+      checker.check('karma-coverage');
+    }
+
+and `builders/unit-test/options.js` normalizes the option to an object:
+
+    coverage: { enabled: options.coverage, exclude: ..., include: ..., reporters: ..., thresholds: ..., watermarks: ... }
+
+An object is always truthy, so the check fires on every run, with coverage on
+or off. The Vitest runner in the same builder guards the same kind of check
+with `options.coverage.enabled` and behaves correctly, which is how we know
+this is a bug on Angular's side rather than a rule we misread. DeepTest passes
+no `--coverage` for Karma, generates no coverage reporter, and reads none of
+that package's output. It has to be installed anyway.
+
+Two things follow, and the second is the one that matters.
+
+The wording has to carry both halves, or it reads as a contradiction. The tool
+says it needs no coverage provider and then asks the person to install one.
+So the sentence is "karma-coverage is required by Angular's Karma runner.
+DeepTest/Witness does not use it for measurement."
+
+And the removal shipped. It went out in 1.0.17, survived 1.0.18, and was found
+by running a real project, not by a test. The preflight exists precisely to
+stop a run that the runner will refuse, and nothing checked that the preflight
+still asked for what the runner asks for. The test added with the fix
+withholds each of the four packages the builder checks for in turn, so the
+next person who reasons "we do not use this any more" gets a failure instead
+of a shipped regression. That is three defects in one day found by Angular
+rather than by us, all in the Angular drivers, which are the only drivers with
+no end-to-end test in any suite.
+
+## The Angular numbers, reconciled: 21 attributed lines became 18 (2026-09-22)
+
+1.0.17 moved Angular onto Witness and the attributed-line count on the
+angular-vitest port fell from 21 to 18, coverage from 25.61 percent to 22.5.
+The account given at the time was plausible and unproven, and it was recorded
+as unproven. This is the reconciliation.
+
+The whole difference is one file.
+
+| file | 1.0.15, lines/covered/attributed | 1.0.17 | attributed change |
+|---|---|---|---|
+| `greet.ts` | 9/9/9 | 9/9/9 | none |
+| `names.ts` | 13/8/8 | 18/8/8 | none |
+| `greeting.ts` | 4/4/4 | 1/1/1 | minus 3 |
+
+`greet.ts` and `names.ts` attribute exactly the lines they attributed before,
+nine and eight. All three missing lines are in `greeting.ts`.
+
+Both instrumenters were then run over that port's actual `greeting.ts` rather
+than reasoned about. istanbul-lib-instrument over the source produces three
+statements on two distinct lines, 10 and 11. Witness produces one statement
+line, 11, and records lines 10 and 11 as skipped with the decorated-field
+reason. Lines 10 and 11 are `readonly name = input.required<string>()` and
+`readonly text = computed(() => hello(this.name()))`.
+
+So of the four lines the old path attributed:
+
+1. Two correspond to real source lines, 10 and 11, and both are field
+   initialisers. Witness leaves both initialisers uncounted, because Angular
+   rejects any wrapper around one with NG8110, but it still counts the code
+   inside them, and the computed arrow body sits on line 11. Line 11 survives;
+   line 10 does not. That is one of the three, and it is the explicitly
+   skipped field syntax, shown on the card with its reason rather than hidden.
+2. The other two have no distinct source line at all. The source has two
+   executable lines and the old path reported four, because the builder
+   instruments its own compiled output, where the decorator is lowered into
+   code, and the counters were then mapped back through the chunk's source
+   map. That is the other two, and it is compiled-output semantics.
+
+The limitation, stated rather than papered over: those two compiled-only
+entries have no meaningful true source-line identity. Naming the line numbers
+the old source maps assigned them would mean restoring the deleted 1.0.15
+driver to run it once, and the labels would describe artifacts of a compiler's
+output rather than anything in the file. The arithmetic is closed without
+them, from two measurements: the universe of 4 recorded at 1.0.15 and the
+source universe of 2 measured now.
+
+The universe corroborates it from the other direction. 82 lines became 80:
+`greeting.ts` minus 3, `schedule.service.ts` 51 to 49, `app.ts` 2 to 0, and
+`names.ts` 13 to 18. That last one is the finding the 1.0.15 notes already
+recorded in "The three universes, measured": `names.ts` is plain TypeScript
+with no component in it, and the bundled path lost five of its executable
+lines, which shrank the denominator and flattered the coverage figure. The old
+path under-counted plain TypeScript as well as components. 1.0.17 corrected it
+in exactly the direction those notes predicted, which is why the percentage
+fell while the measurement got better.
+
+Nothing here required a product change. The conclusion is that the two numbers
+measure different things, the new one measures the code a person is reading,
+and the difference is fully accounted for by the two mechanisms that were
+supposed to cause it.
+
 ## Angular is the only runner that type-checks what Witness emits (1.0.17)
 
 Two defects in the rewrite shipped for months and were invisible everywhere

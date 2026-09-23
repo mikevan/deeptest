@@ -183,55 +183,15 @@ export function detectAngularKarmaConfig(workspaceRoot: string): string | undefi
   return undefined;
 }
 
-/** What the shadow tree needs to know about the Angular project it will stand in for. */
-export interface AngularTestTarget {
-  /** The folder the builder globs `include` patterns from, absolute. */
-  projectSourceRoot: string;
-  /** The tsconfig the test target names, relative to the workspace, or undefined when it names none. */
-  tsConfig?: string;
-}
 
 /**
- * The test target of the project that uses the unit-test builder, in the two
- * details the shadow tree depends on.
+ * The Angular project using the unit-test builder, and the tsconfig that
+ * builder type-checks tests under.
  *
- * `projectSourceRoot` is the one that bites. The builder globs every
- * `include` pattern with that folder as the working directory, and the Karma
- * compatibility layer additionally strips a leading slash from each pattern
- * before handing it on, so an absolute pattern becomes a relative one and
- * matches nothing. The shadow tree lives outside the source root, so its
- * include has to be written relative to this folder, and that means knowing
- * it. Angular's own rule is copied exactly: the project's `root` joined to
- * the workspace, then `src` under it, unless `sourceRoot` is given, which is
- * resolved against the workspace rather than against the project root.
+ * It lives in Witness from 1.0.19, because UntangleIt's recorded runs point
+ * the same builder at the same kind of shadow tree and need the same answer.
+ * Re-exported here so this module stays the one place the drivers ask about
+ * Angular.
  */
-export function detectAngularTestTarget(workspaceRoot: string): AngularTestTarget | undefined {
-  const angular = readJson(path.join(workspaceRoot, 'angular.json'));
-  const projects = angular?.projects as Record<string, { root?: string; sourceRoot?: string; architect?: Record<string, { builder?: string; options?: { tsConfig?: string } }> }> | undefined;
-  for (const project of Object.values(projects ?? {})) {
-    const test = project.architect?.test;
-    if (test?.builder !== '@angular/build:unit-test') {
-      continue;
-    }
-    const projectRoot = path.join(workspaceRoot, project.root ?? '');
-    // The builder's own order of preference, kept exactly: the target's own
-    // tsConfig, then tsconfig.spec.json in the project root when it exists,
-    // then the build target's. A generated config that extended the wrong one
-    // would type-check the mirror under the application's settings rather than
-    // the test's, and lose the test types with it.
-    const spec = path.join(project.root ?? '', 'tsconfig.spec.json').split(path.sep).join('/');
-    const tsConfig =
-      typeof test.options?.tsConfig === 'string'
-        ? test.options.tsConfig
-        : fs.existsSync(path.join(workspaceRoot, spec))
-          ? spec
-          : typeof project.architect?.build?.options?.tsConfig === 'string'
-            ? (project.architect.build.options.tsConfig as string)
-            : undefined;
-    return {
-      projectSourceRoot: project.sourceRoot === undefined ? path.join(projectRoot, 'src') : path.join(workspaceRoot, project.sourceRoot),
-      tsConfig,
-    };
-  }
-  return undefined;
-}
+export { detectAngularTestTarget } from '@projectrevivesolutions/witness';
+export type { AngularTestTarget } from '@projectrevivesolutions/witness';

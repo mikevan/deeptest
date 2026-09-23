@@ -209,7 +209,9 @@ export function pytestFailureBeforeTests(output: string, exitCode: number | null
   }
 }
 
-const IGNORED_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'env', '.env', 'site-packages', '.tox', '.mypy_cache', '.pytest_cache', '.deeptest', 'build', 'dist', '.eggs']);
+// The sibling tools' folders, skipped alongside DeepTest's own; see the note
+// on the TypeScript walker.
+const IGNORED_DIRS = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'env', '.env', 'site-packages', '.tox', '.mypy_cache', '.pytest_cache', '.deeptest', '.untangleit', '.keepsafe', 'build', 'dist', '.eggs']);
 const TEST_FILE = /^(test_.*\.py|.*_test\.py|tests?\.py)$/;
 
 export function isTestFile(name: string): boolean {

@@ -15,7 +15,10 @@ import * as path from 'node:path';
 import { repoWasmDir } from '../src/languages/shared/treeSitter';
 import { createInstrumenter, DECORATED_FIELD } from '@projectrevivesolutions/witness';
 import type { WitnessInstrumenter } from '@projectrevivesolutions/witness';
-import { nodeSupportsWitness, parseMochaSummary, detectRunner, witnessUniverse, detectPlaywrightCt, writePlaywrightFixture, playwrightComponentTests, playwrightWrapperConfig, parsePlaywrightSummary, mergePlaywrightRecords, mergeWitnessReports, writeShadowTree } from '../src/languages/typescript/coverage';
+import { nodeSupportsWitness, parseMochaSummary, detectRunner, witnessUniverse, detectPlaywrightCt, playwrightComponentTests, parsePlaywrightSummary, mergePlaywrightRecords, mergeWitnessReports, writeShadowTree } from '../src/languages/typescript/coverage';
+// The Playwright delivery moved into Witness at 1.0.19, because UntangleIt's
+// recorded runs need exactly the same fixture and wrapper config.
+import { writePlaywrightFixture, playwrightWrapperConfig } from '@projectrevivesolutions/witness';
 
 let witness: WitnessInstrumenter;
 const wasmDir = repoWasmDir();
@@ -34,7 +37,12 @@ test('differential: the maps agree with istanbul-lib-instrument on every fixture
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (!/node_modules|coverage|\.deeptest|\.angular|dist/.test(entry.name)) {
+        // The sibling tools' generated folders are skipped alongside DeepTest's
+        // own. From 1.0.19 the browser-gate tests leave a .untangleit in two
+        // fixtures, and without this the differential would measure UntangleIt's
+        // generated hooks and fail for a reason that says nothing about either
+        // instrumenter.
+        if (!/node_modules|coverage|\.deeptest|\.untangleit|\.keepsafe|test-results|\.angular|dist/.test(entry.name)) {
           walk(p);
         }
       } else if (/\.(m?[jt]sx?|c[jt]s)$/.test(entry.name) && !/\.d\.ts$/.test(entry.name)) {
@@ -117,7 +125,7 @@ test('Playwright component tests: detection, the fixture, the wrapper config, th
   assert.deepEqual(detectPlaywrightCt(fixture), { package: '@playwright/experimental-ct-react', configFile: 'playwright-ct.config.ts' });
   assert.equal(detectPlaywrightCt(path.join('test', 'fixtures', 'jsproject-jest')), undefined);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'witness-pw-'));
-  const written = writePlaywrightFixture(dir, '@playwright/experimental-ct-vue');
+  const written = writePlaywrightFixture(path.join(dir, '.deeptest'), '@playwright/experimental-ct-vue');
   assert.equal(path.relative(dir, written).split(path.sep).join('/'), '.deeptest/hooks/witness-playwright.ts', 'the fixture is DeepTest output, not a project file');
   const text = fs.readFileSync(written, 'utf8');
   assert.match(text, /import \{ test as base \} from '@playwright\/experimental-ct-vue'/);
@@ -128,7 +136,7 @@ test('Playwright component tests: detection, the fixture, the wrapper config, th
   for (const spec of playwrightComponentTests(fixture, { testsPath: '', sourceRoot: 'src', fields: {} })) {
     assert.match(fs.readFileSync(path.join(fixture, spec), 'utf8'), /from '@playwright\/experimental-ct-react'/, `${spec} imports the package, not a DeepTest file`);
   }
-  const wrapper = playwrightWrapperConfig(dir, 'playwright-ct.config.ts');
+  const wrapper = playwrightWrapperConfig({ tool: 'DeepTest', workspaceRoot: dir, configFile: 'playwright-ct.config.ts' });
   assert.match(wrapper, /^import base from "file:\/\/\//m);
   assert.match(wrapper, /ctCacheDir: path\.join\(here, 'playwright-cache'\)/, 'its own build cache, since Playwright would reuse a bundle built without the plugin');
   assert.match(wrapper, /testDir: abs\(base\.testDir \?\? '\.'\)/);

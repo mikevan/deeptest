@@ -17,6 +17,8 @@ import { OverlayManager } from './ui/decorations';
 import { absoluteUri, workspaceRootOf } from './ui/paths';
 import { SidebarMessage, SidebarView } from './ui/sidebarView';
 import { StatusBar } from './ui/statusBar';
+import { handOff } from './copilot';
+import { buildFailureBrief } from '@projectrevivesolutions/witness';
 
 let running: vscode.CancellationTokenSource | undefined;
 
@@ -96,6 +98,23 @@ export function activate(context: vscode.ExtensionContext): DeepTestApi {
   const statusBar = new StatusBar(state);
 
   const decisionDeps = { state, output, folder: workspaceFolder, config: () => config };
+  /**
+   * Hands the current failure to the editor's assistant.
+   *
+   * DeepTest supplies the facts, the evidence, and the guardrails; the
+   * assistant supplies the sentences. This is the same hand-off UntangleIt
+   * uses for its briefs, on purpose: one way into the assistant across the
+   * toolkit, not one per product.
+   */
+  const explainFailure = async (): Promise<void> => {
+    const packet = state.problem;
+    if (!packet) {
+      return;
+    }
+    const where = await handOff(buildFailureBrief(packet));
+    output.appendLine(`Handed the failure to your assistant. ${where}`);
+  };
+
   const onSidebarMessage = (msg: SidebarMessage): void => {
     const { path: p, line } = msg;
     switch (msg.type) {
@@ -110,6 +129,9 @@ export function activate(context: vscode.ExtensionContext): DeepTestApi {
         break;
       case 'output':
         output.show(true);
+        break;
+      case 'explain':
+        void explainFailure();
         break;
       case 'toggleNumbers':
         void vscode.commands.executeCommand('deeptest.toggleNumbers');

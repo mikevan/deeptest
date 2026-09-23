@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, angularCliBin, parseKarmaSummary, angularKarmaConfig, readTsPaths, renameTestFiles, writeShadowTsConfig, reconcile, parseAttribution, readUnmeasured, witnessTransform } from '../src/languages/typescript/coverage';
+import { TypeScriptCoverageSource, buildCoverages, detectRunner, findVitestConfig, guessSourceRoot, guessTestsPath, isTestFile, parseJestSummary, parseVitestSummary, walkSources, angularCliBin, parseKarmaSummary, angularKarmaConfig, clearWorkDir, readTsPaths, renameTestFiles, writeShadowTsConfig, reconcile, parseAttribution, readUnmeasured, witnessTransform, userFacingFailure, DiagnosedError } from '../src/languages/typescript/coverage';
 import { typescriptPlugin } from '../src/languages/typescript';
+import { upstreamPathFailure } from '@projectrevivesolutions/witness';
 import { detectAngularBuilder, detectAngularKarmaConfig, detectAngularRunner, detectAngularRunnerConfig, detectFramework, frameworkSentence } from '../src/languages/typescript/framework';
 import type { FileCoverage } from '../src/engine/types';
 import { guessLanguage } from '../src/detect/language';
@@ -278,18 +279,40 @@ test('plugin detect puts the framework first in the notes, and says ng test for 
   assert.equal(plain.notes.some((n) => /^Framework:/.test(n)), false);
 });
 
+/**
+ * An Angular project with nothing installed, built here rather than borrowed.
+ *
+ * This used to point at the HelloWorlds ports and lean on their having no
+ * node_modules. That held until 1.0.19, when the Angular Karma port had to be
+ * installed so the behaviour gate could run a real browser against it, and
+ * this test began failing for a reason that said nothing about DeepTest: the
+ * CLI really was installed, so the preflight really did pass. A unit test
+ * about an uninstalled project has to own the uninstalled project.
+ */
+function uninstalledAngular(runner: 'karma' | 'vitest'): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `deeptest-ng-${runner}-`));
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ dependencies: { '@angular/core': '^22.1.0' }, devDependencies: { '@angular/cli': '^22.1.8' } }));
+  fs.writeFileSync(path.join(root, 'angular.json'), JSON.stringify({ projects: { app: { architect: { test: { builder: '@angular/build:unit-test', options: { runner } } } } } }));
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  return root;
+}
+
 test('checkEnvironment on an Angular project: both flavours want the CLI installed first, and the older Karma builder is refused (1.0.5)', async () => {
   const source = new TypeScriptCoverageSource({});
-  // The fixtures carry no node_modules, so both builder paths stop at the CLI and ask for npm install, never for Vitest.
-  for (const [port, runner] of [['angular-karma', 'Karma'], ['angular-vitest', 'Vitest']] as const) {
-    const env = await source.checkEnvironment({ workspaceRoot: HW(port), settings: settings('src'), log: () => undefined });
+  // Nothing is installed in either of these, so both builder paths stop at the
+  // CLI and ask for npm install, never for Vitest.
+  for (const [flavour, runner] of [['karma', 'Karma'], ['vitest', 'Vitest']] as const) {
+    const root = uninstalledAngular(flavour);
+    assert.equal(detectAngularRunner(root), flavour, 'the synthetic project is the flavour it claims to be');
+    assert.equal(detectAngularBuilder(root), 'unit-test');
+    assert.equal(angularCliBin(root), undefined, 'and its CLI really is absent, which is the whole premise');
+    const env = await source.checkEnvironment({ workspaceRoot: root, settings: settings('src'), log: () => undefined });
     assert.equal(env.ok, false);
     assert.match(env.summary, /Angular CLI not installed/);
     assert.equal(env.fix?.title, 'Run npm install');
     assert.match(env.problems[0], new RegExp(`"ng test" with ${runner}`));
     assert.doesNotMatch(env.problems.join(' '), /Install Vitest|Install Jest/);
   }
-  assert.equal(angularCliBin(HW('angular-vitest')), undefined);
   const legacy = fs.mkdtempSync(path.join(os.tmpdir(), 'deeptest-legacy-'));
   fs.writeFileSync(path.join(legacy, 'package.json'), JSON.stringify({ dependencies: { '@angular/core': '^16.0.0' } }));
   fs.writeFileSync(path.join(legacy, 'angular.json'), JSON.stringify({ projects: { app: { architect: { test: { builder: '@angular-devkit/build-angular:karma' } } } } }));
@@ -301,8 +324,69 @@ test('checkEnvironment on an Angular project: both flavours want the CLI install
   assert.equal(refused.fix, undefined);
   assert.match(refused.problems[0], /@angular-devkit\/build-angular:karma/);
   assert.match(refused.problems[0], /Nothing needs installing\./);
+  // These two read angular.json and nothing else, so they are unaffected by
+  // whether a port happens to be installed and stay pointed at the real ones.
   assert.equal(detectAngularBuilder(HW('angular-karma')), 'unit-test');
   assert.equal(detectAngularBuilder(JEST_FIXTURE), undefined);
+});
+
+/**
+ * The preflight has to ask for everything Angular's Karma runner asks for,
+ * or it says the environment is ok and then the runner refuses, which is the
+ * exact failure 1.0.15 built the preflight to remove.
+ *
+ * `karma-coverage` is the one that got away. 1.0.17 dropped it on the
+ * reasoning that DeepTest had stopped using it for measurement, which was
+ * true and beside the point: Angular's builder guards its check with
+ * `if (options.coverage)` and `options.coverage` is an object carrying an
+ * `enabled` field, so it is truthy with coverage off, and the package is
+ * demanded on every run. Nothing in any suite noticed. It shipped in 1.0.17
+ * and 1.0.18 and was found by running a real Angular Karma project.
+ *
+ * So the test withholds each package in turn. It fails if the preflight stops
+ * asking for any of them, whatever the reasoning at the time.
+ */
+test('the Angular Karma preflight asks for every package the builder refuses to start without', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deeptest-ngkarma-'));
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'p', dependencies: { '@angular/core': '^22.0.0' } }));
+  fs.writeFileSync(path.join(dir, 'angular.json'), JSON.stringify({ projects: { app: { architect: { test: { builder: '@angular/build:unit-test', options: { runner: 'karma' } } } } } }));
+  const install = (name: string, contents: Record<string, unknown> = { name, version: '1.0.0' }): void => {
+    const at = path.join(dir, 'node_modules', ...name.split('/'));
+    fs.mkdirSync(at, { recursive: true });
+    fs.writeFileSync(path.join(at, 'package.json'), JSON.stringify(contents));
+  };
+  // The CLI is checked first and by its binary, not by its package.json.
+  fs.mkdirSync(path.join(dir, 'node_modules', '@angular', 'cli', 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'node_modules', '@angular', 'cli', 'bin', 'ng.js'), '');
+  fs.writeFileSync(path.join(dir, 'node_modules', '@angular', 'cli', 'package.json'), JSON.stringify({ name: '@angular/cli', version: '22.1.8' }));
+
+  const required = ['karma', 'karma-jasmine', 'karma-chrome-launcher', 'karma-coverage'] as const;
+  for (const name of required) {
+    install(name);
+  }
+  const source = new TypeScriptCoverageSource({});
+  const ctx = { workspaceRoot: dir, settings: settings('src'), log: () => undefined };
+  const complete = await source.checkEnvironment(ctx);
+  assert.equal(complete.ok, true, `a project with all four is ready: ${complete.problems.join(' ')}`);
+
+  for (const name of required) {
+    const at = path.join(dir, 'node_modules', name);
+    const kept = fs.readFileSync(path.join(at, 'package.json'), 'utf8');
+    fs.rmSync(at, { recursive: true, force: true });
+    const refused = await source.checkEnvironment(ctx);
+    assert.equal(refused.ok, false, `without ${name} the run cannot start, and the check has to say so before the runner does`);
+    assert.match(refused.summary, new RegExp(`${name} missing$`));
+    assert.equal(refused.fix?.title, `Install ${name}`);
+    assert.deepEqual(refused.fix?.args, ['install', '--save-dev', name]);
+    install(name, JSON.parse(kept) as Record<string, unknown>);
+  }
+
+  // The sentence for this one says both halves out loud, because a person
+  // reading "install a coverage package" from a tool that just told them it
+  // needs no coverage package deserves to know which of the two is lying.
+  fs.rmSync(path.join(dir, 'node_modules', 'karma-coverage'), { recursive: true, force: true });
+  const coverage = await source.checkEnvironment(ctx);
+  assert.equal(coverage.problems[0], "karma-coverage is required by Angular's Karma runner. DeepTest/Witness does not use it for measurement.");
 });
 
 test('parseKarmaSummary reads the last Executed line', () => {
@@ -430,7 +514,7 @@ test('a single-file component is parsed through its script block on its real lin
  * test cannot prove a path measures anything, so none of these claim to.
  */
 test('the generated Karma config wraps the project\'s own, adds Witness, and keeps the browser headless', () => {
-  const generated = angularKarmaConfig({ workspaceRoot: path.join('p'), hookDir: path.join('p', '.deeptest', 'hooks'), userConfig: 'karma.conf.js' });
+  const generated = angularKarmaConfig({ tool: 'DeepTest', workspaceRoot: path.join('p'), hookDir: path.join('p', '.deeptest', 'hooks'), userConfig: 'karma.conf.js' });
   assert.match(generated, /require\("p\/karma\.conf\.js"\)\(config\);/, "the project's own config is applied first, so its settings are the ones being added to");
   assert.doesNotMatch(generated, /basePath/, 'and the builder\'s defaults are not also set: giving it a config is what takes them away, applying both would fight');
   assert.match(generated, /require\("p\/\.deeptest\/hooks\/witness-karma\.cjs"\)/, 'the plugin, by absolute path, because Karma resolves plugins from its own folder');
@@ -445,7 +529,7 @@ test('the generated Karma config wraps the project\'s own, adds Witness, and kee
   assert.match(generated, /b === 'Chrome' \? 'ChromeHeadless' : b/);
   assert.doesNotMatch(generated, /coverageReporter|karma-coverage/, 'Witness instruments before the builder bundles, so Karma\'s own coverage is not involved');
 
-  const bare = angularKarmaConfig({ workspaceRoot: '/p', hookDir: '/p/.deeptest/hooks' });
+  const bare = angularKarmaConfig({ tool: 'DeepTest', workspaceRoot: '/p', hookDir: '/p/.deeptest/hooks' });
   assert.match(bare, /frameworks: \['jasmine'\],/, 'with no config of its own the project gets the defaults the builder would have applied');
   assert.match(bare, /plugins: \['karma-jasmine', 'karma-chrome-launcher'\]\.map\(\(p\) => projectRequire\(p\)\),/, "resolved from the project, not from DeepTest's own node_modules");
   assert.doesNotMatch(bare, /karma\.conf\.js/);
@@ -471,6 +555,33 @@ test('a test id names the spec the person wrote, not the copy that ran', () => {
   assert.equal(out[2], '');
   assert.equal(out[3], 'not json at all', 'a torn line is passed through rather than dropped');
   assert.deepEqual(renameTestFiles(lines, '.deeptest/instrumented/', ''), [JSON.stringify({ test: 'app/greeting.spec.ts::Greeting > renders', files: { '/p/src/app/greeting.ts': [14] } }), lines[1], '', 'not json at all'], 'a project whose source root is the project root gets no prefix put back');
+});
+
+/**
+ * The folder is emptied by ownership, not by a list of names. Deleting the
+ * three folders a run writes meant a generated file DeepTest had stopped
+ * producing stayed forever: `.deeptest/vitest.config.mjs` from the Istanbul
+ * Angular path outlived the code that wrote it by two deliveries, in every
+ * port, still naming a coverage provider.
+ */
+test('the work folder keeps the decisions and nothing else', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deeptest-workdir-'));
+  const work = path.join(dir, '.deeptest');
+  fs.mkdirSync(path.join(work, 'instrumented', 'src'), { recursive: true });
+  fs.mkdirSync(path.join(work, 'attribution'), { recursive: true });
+  fs.mkdirSync(path.join(work, 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(work, 'decisions.json'), '{"version":1}');
+  fs.writeFileSync(path.join(work, 'vitest.config.mjs'), "provider: 'istanbul'");
+  fs.writeFileSync(path.join(work, 'karma.conf.cjs'), '// generated');
+  fs.writeFileSync(path.join(work, 'instrumented', 'src', 'gone.ts'), 'export const x = 1;');
+
+  clearWorkDir(work);
+
+  assert.deepEqual(fs.readdirSync(work), ['decisions.json'], 'the decisions are the person\'s and travel with the code; everything else is rebuilt by the run that follows');
+  assert.equal(fs.readFileSync(path.join(work, 'decisions.json'), 'utf8'), '{"version":1}', 'and they are not rewritten on the way past');
+
+  clearWorkDir(path.join(dir, 'never-existed'));
+  assert.ok(true, 'a first run has no folder to empty, and that is not an error');
 });
 
 /**
@@ -509,3 +620,56 @@ test('the shadow tsconfig repoints aliases into the mirror, and leaves the ones 
   assert.equal((JSON.parse(fs.readFileSync(writeShadowTsConfig(workDir, bare, src, instrumented), 'utf8')) as { compilerOptions?: unknown }).compilerOptions, undefined, 'a project with no aliases gets no paths block invented for it');
 });
 
+
+/**
+ * What a person reads on the results panel when a run died before a test.
+ *
+ * The runner's own reason for an Angular or Playwright build that never
+ * started is "produced no coverage, and ended with exit code 1". True, and
+ * it sends someone straight to their tests, which are not the problem. When
+ * the toolkit placed the failure, its headline stands on its own and the
+ * runner's reason goes to the log.
+ */
+test('a failure the toolkit placed is reported as that, and only that', () => {
+  const packet = upstreamPathFailure({
+    workspaceRoot: "C:\\workspace\\MikeVan's AI Development Toolkit",
+    runner: 'ng-karma',
+    output: ['Application bundle generation failed.', "  1 │ import 'C:/workspace/MikeVan's AI Development Toolkit/app/polyfills.js';"].join('\n'),
+    succeeded: false,
+  })!.packet;
+  const reason = 'ng test produced no coverage, and ended with exit code 1. Press "Show the log" to see the test run.';
+
+  const shown = userFacingFailure(reason, packet.headline);
+  assert.equal(shown, packet.headline, 'the headline is the message');
+  assert.ok(!shown.includes('produced no coverage'), "and the runner's own reason is not glued onto it");
+  assert.ok(!shown.includes('\n'), 'one line on the panel, not a report');
+});
+
+test('a failure with no diagnosis reads exactly as it always did', () => {
+  const reason = 'vitest produced no coverage, and ended with exit code 1. Press "Show the log" to see the test run.';
+  assert.equal(userFacingFailure(reason, ''), reason, 'nothing about ordinary failures changed');
+});
+
+/**
+ * The packet has to survive the throw, or the panel has nothing to build the
+ * "Explain with Copilot" offer from and the person is back to a line and a
+ * log. This is the seam that carries it.
+ */
+test('a diagnosed failure carries its packet out to whoever shows it', () => {
+  const packet = upstreamPathFailure({
+    workspaceRoot: "C:\\workspace\\MikeVan's AI Development Toolkit",
+    runner: 'playwright-ct',
+    output: ["  Failed to parse code in 'C:/workspace/MikeVan's AI Development Toolkit/playwright/index.ts'", '✗ Build failed in 62ms'].join('\n'),
+    succeeded: false,
+  })!.packet;
+  const err: unknown = new DiagnosedError(packet.headline, packet);
+
+  assert.ok(err instanceof Error, 'it is still an error, and every existing catch still works');
+  assert.ok(err instanceof DiagnosedError, 'and the layer that shows it can tell there is more');
+  assert.equal((err as DiagnosedError).packet.condition, 'path-character');
+  assert.deepEqual((err as DiagnosedError).packet.actions, ['explain'], 'moving a folder is not a code change, so no fix is offered');
+  assert.equal((err as Error).message, packet.headline);
+
+  // An ordinary failure is an ordinary Error, and nothing offers to explain it.
+  assert.ok(!(new Error('vitest is not installed. Run npm install.') instanceof DiagnosedError));
+});

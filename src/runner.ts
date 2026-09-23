@@ -19,6 +19,7 @@ import { LanguagePlugin, LanguageSettings } from './languages/types';
 import { ResultState } from './state';
 import { workspaceRootOf } from './ui/paths';
 import { evidenceProblemSentence, nothingToScoreSentence, testsRan } from './ui/words';
+import { DiagnosedError } from './languages/typescript/coverage';
 
 export interface RunnerDeps {
   extensionUri: vscode.Uri;
@@ -129,7 +130,10 @@ export async function runAnalysis(deps: RunnerDeps, folder: vscode.WorkspaceFold
   } catch (err) {
     const message = (err as Error).message;
     log(message);
-    state.setError(message);
+    // A failure the toolkit placed carries what it established, so the panel
+    // can offer to have it explained rather than leaving the person with a
+    // line and a log.
+    state.setError(message, err instanceof DiagnosedError ? err.packet : undefined);
     return;
   }
   if (token.isCancellationRequested) {

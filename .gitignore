@@ -15,6 +15,11 @@ test/fixtures/pyproject/.vscode/
 
 # Fixture copies of the HelloWorlds ports (scripts/sync-fixtures.mjs) install their own dependencies when a test needs them.
 test/fixtures/helloworld-*/node_modules/
+# The behaviour gate's working folders, and Playwright's own output, under any
+# fixture. The rules below carry a slash, so git anchors them to this file's
+# folder and they never reached test/fixtures/helloworld-*/.
+**/.untangleit/*
+**/test-results/
 # UntangleIt's working files, when UntangleIt measures this project; the run record travels with the code.
 .untangleit/*
 !.untangleit/runs.json
